@@ -1,0 +1,25 @@
+{
+  "schema": "portable-skill-adapter",
+  "schema_version": "1.0.0",
+  "platform": "sealseek",
+  "mappings": [
+    {
+      "capability_id": "command.execute",
+      "implementation": { "kind": "cli", "command": "topazlabscli" },
+      "features": ["local-process", "stdout-json", "exit-code"],
+      "status": "implemented",
+      "configuration": ["topazlabscli must resolve from PATH"],
+      "permissions": ["local process execution", "network access to configured SSH target"],
+      "normalization": "Invoke with --json and consume {ok,data,error}."
+    },
+    {
+      "capability_id": "filesystem.local",
+      "implementation": { "kind": "agent-native", "name": "SealSeek/OpenClaw filesystem capability" },
+      "features": ["read-file", "write-file", "inspect-metadata"],
+      "status": "implemented",
+      "configuration": [],
+      "permissions": ["input and output paths must be within the user's authorized scope"],
+      "normalization": "Return absolute local paths and verified metadata."
+    }
+  ]
+}

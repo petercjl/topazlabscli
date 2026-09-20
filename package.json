@@ -1,0 +1,44 @@
+{
+  "name": "@petercjl/topazlabscli",
+  "version": "0.1.0",
+  "description": "Cross-Agent CLI and portable Skill for queued remote Topaz Video AI processing",
+  "type": "module",
+  "bin": {
+    "topazlabscli": "bin/topazlabscli.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "worker",
+    "skill",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check bin/topazlabscli.mjs && node --check src/cli.mjs && npm test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/petercjl/topazlabscli.git"
+  },
+  "homepage": "https://github.com/petercjl/topazlabscli#readme",
+  "bugs": {
+    "url": "https://github.com/petercjl/topazlabscli/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "topaz",
+    "video-ai",
+    "ssh",
+    "gpu",
+    "agent-skill"
+  ]
+}

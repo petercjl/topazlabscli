@@ -1,0 +1,42 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+
+const root = path.resolve(import.meta.dirname, "..");
+const bin = path.join(root, "bin", "topazlabscli.mjs");
+
+function cli(args, env = {}) {
+  return spawnSync(process.execPath, [bin, ...args], { encoding: "utf8", env: { ...process.env, ...env } });
+}
+
+test("version and capabilities are machine-readable", () => {
+  const version = cli(["version"]);
+  assert.equal(version.status, 0);
+  assert.equal(version.stdout.trim(), "0.1.0");
+  const result = cli(["capabilities", "--json"]);
+  assert.equal(result.status, 0);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.presets[0].model, "prob-4");
+});
+
+test("target configuration preserves endpoint order", () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "topazlabscli-test-"));
+  const config = path.join(temporary, "config.json");
+  const result = cli(["target", "add", "gpu", "--endpoint", "lan=gpu.local", "--endpoint", "vpn=gpu-vpn", "--user", "worker", "--default", "--json"], { TOPAZLABSCLI_CONFIG: config });
+  assert.equal(result.status, 0, result.stderr);
+  const stored = JSON.parse(fs.readFileSync(config, "utf8"));
+  assert.deepEqual(stored.targets.gpu.endpoints.map((item) => item.name), ["lan", "vpn"]);
+  if (process.platform !== "win32") assert.equal(fs.statSync(config).mode & 0o777, 0o600);
+});
+
+test("unknown command returns a structured error", () => {
+  const result = cli(["nope", "--json"]);
+  assert.equal(result.status, 1);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.error.code, "COMMAND_UNKNOWN");
+});

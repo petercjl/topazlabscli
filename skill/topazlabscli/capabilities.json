@@ -1,0 +1,36 @@
+{
+  "schema": "portable-skill-capabilities",
+  "schema_version": "1.0.0",
+  "skill": "topazlabscli",
+  "target_platforms": ["codex", "sealseek"],
+  "capabilities": [
+    {
+      "id": "command.execute",
+      "purpose": "Run the stable topazlabscli executable and parse JSON results.",
+      "required": true,
+      "required_features": ["local-process", "stdout-json", "exit-code"],
+      "input_fields": ["argv"],
+      "output_fields": ["ok", "data", "error"],
+      "side_effects": {
+        "external_mutation": "May upload videos and enqueue remote processing only when the user requests processing.",
+        "may_cost_money": false,
+        "authorization": "Requires the user's configured SSH access and an explicit processing request."
+      },
+      "standard_errors": ["CAPABILITY_UNAVAILABLE", "AUTH_REQUIRED", "PERMISSION_REQUIRED", "PROVIDER_FAILURE", "OUTPUT_CONTRACT_FAILED"]
+    },
+    {
+      "id": "filesystem.local",
+      "purpose": "Read input videos and write downloaded outputs.",
+      "required": true,
+      "required_features": ["read-file", "write-file", "inspect-metadata"],
+      "input_fields": ["path"],
+      "output_fields": ["exists", "path", "size"],
+      "side_effects": {
+        "external_mutation": "Writes only to the output path requested by the user.",
+        "may_cost_money": false,
+        "authorization": "The path must be within the user's authorized filesystem scope."
+      },
+      "standard_errors": ["CAPABILITY_UNAVAILABLE", "PERMISSION_REQUIRED", "OUTPUT_CONTRACT_FAILED"]
+    }
+  ]
+}

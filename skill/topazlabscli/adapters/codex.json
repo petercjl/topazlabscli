@@ -1,0 +1,29 @@
+{
+  "schema": "portable-skill-adapter",
+  "schema_version": "1.0.0",
+  "platform": "codex",
+  "mappings": [
+    {
+      "capability_id": "command.execute",
+      "implementation": { "kind": "cli", "command": "topazlabscli" },
+      "features": ["local-process", "stdout-json", "exit-code"],
+      "status": "tested",
+      "tested_date": "2026-09-20",
+      "evidence": ["Codex invoked topazlabscli process --json through the local terminal and received a completed remote job contract."],
+      "configuration": ["topazlabscli must resolve from PATH"],
+      "permissions": ["local process execution", "network access to configured SSH target"],
+      "normalization": "Invoke with --json and consume {ok,data,error}."
+    },
+    {
+      "capability_id": "filesystem.local",
+      "implementation": { "kind": "agent-native", "name": "Codex filesystem tools" },
+      "features": ["read-file", "write-file", "inspect-metadata"],
+      "status": "tested",
+      "tested_date": "2026-09-20",
+      "evidence": ["Codex verified the downloaded MP4 with local ffprobe after the end-to-end job completed."],
+      "configuration": [],
+      "permissions": ["input and output paths must be within the user's authorized scope"],
+      "normalization": "Return absolute local paths and verified metadata."
+    }
+  ]
+}
