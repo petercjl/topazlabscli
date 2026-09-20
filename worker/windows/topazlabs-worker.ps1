@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$WorkerVersion = '0.1.0'
+$WorkerVersion = '0.1.1'
 $StateRoot = Join-Path $Root '.topazlabscli'
 $QueueRoot = Join-Path $StateRoot 'queue'
 $JobsRoot = Join-Path $StateRoot 'jobs'
@@ -103,7 +103,7 @@ function Invoke-Job($Job, $Config) {
   }
   $env:TVAI_MODEL_DIR = [string]$Config.model_dir
   $env:TVAI_MODEL_DATA_DIR = [string]$Config.model_data_dir
-  $filter = "tvai_up=model=prob-4:scale=0:w=${targetWidth}:h=${targetHeight}:preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=20:blend=0.2:device=0:vram=1:instances=1"
+  $filter = "tvai_up=model=prob-4:scale=0:w=${targetWidth}:h=${targetHeight}:preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=20:blend=0.2:device=0:vram=1:instances=1,scale=w=${targetWidth}:h=${targetHeight}:flags=lanczos"
   $arguments = @(
     '-hide_banner', '-nostdin', '-y', '-strict', '2', '-i', $inputPath,
     '-sws_flags', 'spline+accurate_rnd+full_chroma_int', '-vf', $filter,
@@ -138,6 +138,8 @@ switch ($Action) {
       $config | ConvertTo-Json | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
     }
     $current = Read-WorkerConfig
+    $current.worker_version = $WorkerVersion
+    $current | ConvertTo-Json | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
     $model = Get-ModelStatus $current
     Write-Json @{ ok = $true; installed = $true; worker_version = $WorkerVersion; root = $Root; model_ready = $model.model_ready }
   }

@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 
 const root = path.resolve(import.meta.dirname, "..");
 const bin = path.join(root, "bin", "topazlabscli.mjs");
+const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
 function cli(args, env = {}) {
   return spawnSync(process.execPath, [bin, ...args], { encoding: "utf8", env: { ...process.env, ...env } });
@@ -15,7 +16,7 @@ function cli(args, env = {}) {
 test("version and capabilities are machine-readable", () => {
   const version = cli(["version"]);
   assert.equal(version.status, 0);
-  assert.equal(version.stdout.trim(), "0.1.0");
+  assert.equal(version.stdout.trim(), pkg.version);
   const result = cli(["capabilities", "--json"]);
   assert.equal(result.status, 0);
   const payload = JSON.parse(result.stdout);
