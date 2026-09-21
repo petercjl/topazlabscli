@@ -15,7 +15,9 @@ npm install --global @petercjl/topazlabscli
 topazlabscli skill install --agent all
 ```
 
-The CLI checks npm for a newer stable release before operational commands, at most once every six hours. When an update is available it upgrades itself, refreshes installed Agent Skills, and then resumes the original command. A temporary npm outage does not block video processing. `topazlabscli update` forces an immediate manual update.
+The CLI checks npm for a newer stable release before operational commands, at most once every six hours. When an update is available it upgrades itself, refreshes installed Agent Skills, and then resumes the original command. It discovers npm through the running Node installation, preserves SealSeek's managed global prefix/cache, and discovers Windows OpenSSH through the standard system location, so it also works in Agent runtimes with a restricted `PATH`. A temporary npm outage does not block video processing. `topazlabscli update` forces an immediate manual update.
+
+On Windows, SealSeek Skills are installed into `%USERPROFILE%\.sealseek\workspace\skills` when that workspace is present. The CLI automatically uses a managed copy because SealSeek rejects junctions that resolve outside the workspace Skill root; subsequent CLI updates refresh the copy from the npm package. The copy includes a local runtime manifest so the Agent can invoke the canonical package even when its PATH is restricted. `SEALSEEK_SKILLS_HOME` remains available as an explicit override.
 
 ## Configure a target
 

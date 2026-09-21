@@ -58,9 +58,14 @@ export async function maybeAutoUpdate(rawArgs, pkg, dependencies = {}) {
   }
 
   const execute = dependencies.run || run;
-  const query = await execute("npm", ["view", pkg.name, "version", "--json"], {
-    env: { ...env, npm_config_fetch_timeout: env.npm_config_fetch_timeout || "5000", npm_config_fetch_retries: "0" }
-  });
+  let query;
+  try {
+    query = await execute("npm", ["view", pkg.name, "version", "--json"], {
+      env: { ...env, npm_config_fetch_timeout: env.npm_config_fetch_timeout || "5000", npm_config_fetch_retries: "0" }
+    });
+  } catch (error) {
+    return { checked: true, warning: `Unable to check npm for updates: ${error.message}` };
+  }
   if (query.code !== 0) {
     return { checked: true, warning: query.stderr.trim() || "Unable to check npm for updates." };
   }
@@ -74,15 +79,29 @@ export async function maybeAutoUpdate(rawArgs, pkg, dependencies = {}) {
   const getSkillStatus = dependencies.skillStatus || skillStatus;
   const installSkill = dependencies.skillInstall || skillInstall;
   const installedSkills = getSkillStatus("all").filter((item) => item.installed);
-  const install = await execute("npm", ["install", "--global", `${pkg.name}@latest`], { env });
+  let install;
+  try {
+    install = await execute("npm", ["install", "--global", `${pkg.name}@latest`], { env });
+  } catch (error) {
+    return { checked: true, warning: `Automatic npm update failed: ${error.message}`, latest };
+  }
   if (install.code !== 0) {
     return { checked: true, warning: install.stderr.trim() || "Automatic npm update failed.", latest };
   }
-  for (const item of installedSkills) installSkill(item.agent, item.mode || "link", true);
+  const warnings = [];
+  for (const item of installedSkills) {
+    try { installSkill(item.agent, item.mode || "link", true); }
+    catch (error) { warnings.push(`Skill refresh failed for ${item.agent}: ${error.message}`); }
+  }
 
   const reexecute = dependencies.runInherited || runInherited;
-  const child = await reexecute(process.execPath, [binScript, ...rawArgs], {
-    env: { ...env, [UPDATE_GUARD]: "1" }
-  });
-  return { checked: true, updated: true, latest, reexecuted: true, exitCode: child.code ?? 1 };
+  try {
+    const child = await reexecute(process.execPath, [binScript, ...rawArgs], {
+      env: { ...env, [UPDATE_GUARD]: "1" }
+    });
+    return { checked: true, updated: true, latest, reexecuted: true, exitCode: child.code ?? 1, warnings };
+  } catch (error) {
+    warnings.push(`Updated package could not restart the command: ${error.message}`);
+    return { checked: true, updated: true, latest, warning: warnings.join(" ") };
+  }
 }

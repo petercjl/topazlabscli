@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { run } from "./process.mjs";
+import { resolveExecutable } from "./runtime.mjs";
 import { CliError } from "./errors.mjs";
 
 function destination(target, endpoint) {
@@ -22,13 +23,15 @@ export function encodePowerShell(script) {
 export async function runPowerShell(target, endpoint, script, { timeout = 7 } = {}) {
   const args = [...commonArgs(target, endpoint, { timeout }), destination(target, endpoint),
     "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(script)];
-  return run("ssh", args);
+  return run("ssh", args, { timeoutMs: (timeout + 3) * 1000 });
 }
 
 export function startPowerShellDetached(target, endpoint, script) {
   const args = [...commonArgs(target, endpoint, { timeout: 10 }), destination(target, endpoint),
     "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(script)];
-  const child = spawn("ssh", args, { detached: true, stdio: "ignore", windowsHide: true });
+  const executable = resolveExecutable("ssh");
+  const child = spawn(executable.command, [...executable.argsPrefix, ...args], { detached: true, stdio: "ignore", windowsHide: true });
+  child.on("error", () => {});
   child.unref();
   return child.pid;
 }
@@ -38,7 +41,13 @@ export async function selectEndpoint(target) {
   for (const endpoint of target.endpoints) {
     const result = await runPowerShell(target, endpoint, "[Console]::Out.Write('TOPAZLABSCLI_OK')");
     const ok = result.code === 0 && result.stdout.includes("TOPAZLABSCLI_OK");
-    attempts.push({ name: endpoint.name, host: endpoint.host, ok, error: ok ? null : result.stderr.trim() });
+    attempts.push({
+      name: endpoint.name,
+      host: endpoint.host,
+      ok,
+      timed_out: Boolean(result.timedOut),
+      error: ok ? null : result.stderr.trim()
+    });
     if (ok) return { endpoint, attempts };
   }
   throw new CliError("CONNECTION_FAILED", `No endpoint is reachable for target ${target.name}.`, { attempts });
@@ -61,7 +70,7 @@ export async function sftpPut(target, endpoint, localPath, remotePath) {
   if (endpoint.port) args.push("-P", String(endpoint.port));
   args.push(destination(target, endpoint));
   const input = `put ${quoteSftp(path.resolve(localPath))} ${quoteSftp(windowsToSftp(remotePath))}\n`;
-  const result = await run("sftp", args, { input });
+  const result = await run("sftp", args, { input, timeoutMs: 15000 });
   if (result.code !== 0) throw new CliError("UPLOAD_FAILED", result.stderr.trim() || "SFTP upload failed.");
   return result;
 }
@@ -73,7 +82,7 @@ export async function sftpGet(target, endpoint, remotePath, localPath) {
   if (endpoint.port) args.push("-P", String(endpoint.port));
   args.push(destination(target, endpoint));
   const input = `get ${quoteSftp(windowsToSftp(remotePath))} ${quoteSftp(path.resolve(localPath))}\n`;
-  const result = await run("sftp", args, { input });
+  const result = await run("sftp", args, { input, timeoutMs: 15000 });
   if (result.code !== 0) throw new CliError("DOWNLOAD_FAILED", result.stderr.trim() || "SFTP download failed.");
   return result;
 }

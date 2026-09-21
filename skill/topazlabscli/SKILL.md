@@ -15,12 +15,13 @@ Use the CLI as the single execution surface. Do not reproduce SSH, SFTP, queue, 
 
 ## Main Line
 
-1. Run `topazlabscli capabilities --json` when the live contract is not already known.
-2. Run `topazlabscli doctor --json` before the first job in a conversation or after a connection/model failure.
-3. For a processing request, confirm the input exists. When the user does not name an output, let the CLI create `INPUT-BASENAME-topaz-1080p.EXT` beside the source.
-4. Prefer `topazlabscli process INPUT --json` for submit, wait, and download as one operation. Add `--output OUTPUT` only when the user explicitly requests another destination. Use separate `job` commands when the user wants asynchronous control.
-5. Inspect the final JSON. Completion requires `state=completed`, a successful download result, and a real local output file.
-6. Report the selected target/endpoint, job ID, output path, preset/model, dimensions, and any warning or failure.
+1. Resolve the CLI invocation once. Prefer `topazlabscli`. In a Windows SealSeek managed-copy installation, if the npm command shim cannot find `node`, read `.topazlabscli-runtime.json` beside this file and execute its `bin` with its `node`; the CLI creates and refreshes that local manifest. SealSeek-managed npm installs must retain its managed global prefix rather than writing into a Node version directory. Reuse the invocation for the rest of the task; do not disable automatic updates.
+2. Run `topazlabscli capabilities --json` when the live contract is not already known.
+3. Run `topazlabscli doctor --json` before the first job in a conversation or after a connection/model failure, and wait for its terminal result before continuing.
+4. For a processing request, confirm the input exists. When the user does not name an output, let the CLI create `INPUT-BASENAME-topaz-1080p.EXT` beside the source.
+5. Prefer `topazlabscli process INPUT --json` for submit, wait, and download as one operation. Add `--output OUTPUT` only when the user explicitly requests another destination. Use separate `job` commands when the user wants asynchronous control.
+6. Inspect the final JSON. Completion requires `state=completed`, a successful download result, and a real local output file.
+7. Report the selected target/endpoint, job ID, output path, preset/model, dimensions, and any warning or failure.
 
 ## Preset Boundary
 
@@ -38,14 +39,14 @@ Use the CLI as the single execution surface. Do not reproduce SSH, SFTP, queue, 
 
 Configuration, hostnames, addresses, usernames, SSH identities, VPN details, media, Topaz binaries, models, and credentials are external to this Skill and npm package. Installation does not grant access to a workstation. Treat the configured server and Topaz license as user-managed resources.
 
-Before operational commands, the CLI performs a cached npm update check. A newer stable package is installed automatically, installed Agent Skills are refreshed, and the original command resumes under the new version. Registry failures produce a warning and continue with the installed version.
+Before operational commands, the CLI performs a cached npm update check. A newer stable package is installed automatically, installed Agent Skills are refreshed, and the original command resumes under the new version. The CLI resolves npm through the running Agent's Node installation when PATH is restricted. Registry, npm, and Skill-refresh failures produce a warning and continue with the installed version.
 
 Do not overwrite a local output unless the user has authorized that exact existing target. The remote worker retains job inputs, outputs, status, and logs for operator review; cleanup is an administrative action outside version 0.2.
 
 ## Skill Management
 
-The npm package is the canonical source. Discover it with `topazlabscli skill source --json`; use `skill status`, `skill install`, and `skill update` for Codex and SealSeek targets. Do not edit installed links or copies as independent sources.
+The npm package is the canonical source. Discover it with `topazlabscli skill source --json`; use `skill status`, `skill install`, and `skill update` for Codex and SealSeek targets. Windows SealSeek automatically receives a managed copy because its Skill loader rejects junctions that escape the workspace root; updates refresh that copy from the package. Do not edit installed links or copies as independent sources.
 
 ## QA and Evolution
 
-Use `doctor --json` plus the final job status as runtime evidence. Treat Codex and SealSeek adapters as `implemented` until each has a recorded real runtime test. New models, presets, cleanup rules, or worker behavior require an authorized package update with CLI, worker, Skill, capability, and test changes together.
+Use `doctor --json` plus the final job status as runtime evidence. Do not leave health checks or job commands running without collecting their terminal result. New models, presets, cleanup rules, or worker behavior require an authorized package update with CLI, worker, Skill, capability, and test changes together.

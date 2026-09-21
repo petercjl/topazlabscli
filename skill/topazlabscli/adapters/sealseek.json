@@ -5,12 +5,20 @@
   "mappings": [
     {
       "capability_id": "command.execute",
-      "implementation": { "kind": "cli", "command": "topazlabscli" },
+      "implementation": {
+        "kind": "cli",
+        "command": "topazlabscli",
+        "fallback": "Read .topazlabscli-runtime.json from the managed Skill copy and run its bin with its node"
+      },
       "features": ["local-process", "stdout-json", "exit-code"],
-      "status": "implemented",
-      "configuration": ["topazlabscli must resolve from PATH", "The bundled topazlabscli Skill must be installed through the CLI"],
+      "status": "tested",
+      "tested_date": "2026-09-21",
+      "evidence": [
+        "A clean Windows SealSeek conversation loaded the managed Skill copy, resolved the global package through its runtime manifest, ran version 0.2.1, capabilities, Skill status, and doctor to terminal results, and reported the bounded remote connection failure without disabling automatic updates."
+      ],
+      "configuration": ["Install the npm package globally", "Install the bundled Skill through the CLI into the SealSeek workspace"],
       "permissions": ["local process execution", "network access to configured SSH target"],
-      "normalization": "Invoke with --json and consume {ok,data,error}."
+      "normalization": "Invoke with --json and consume {ok,data,error}. On Windows with a sanitized PATH, use the CLI-managed runtime manifest in the installed Skill copy."
     },
     {
       "capability_id": "filesystem.local",

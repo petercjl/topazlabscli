@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { bundledSkill, skillTarget } from "./paths.mjs";
+import { binScript, bundledSkill, packageRoot, skillTarget } from "./paths.mjs";
 import { CliError } from "./errors.mjs";
 
 const agents = ["codex", "sealseek"];
@@ -23,7 +23,24 @@ export function skillStatus(selected = "all") {
   });
 }
 
+export function effectiveSkillMode(agent, requestedMode, platform = process.platform) {
+  if (platform === "win32" && agent === "sealseek" && requestedMode === "link") return "copy";
+  return requestedMode;
+}
+
+function writeRuntimeManifest(target) {
+  const manifest = {
+    schema: "topazlabscli-skill-runtime",
+    schema_version: 1,
+    node: process.execPath,
+    bin: binScript,
+    package_root: packageRoot
+  };
+  fs.writeFileSync(path.join(target, ".topazlabscli-runtime.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+}
+
 function installOne(agent, mode, update) {
+  const effectiveMode = effectiveSkillMode(agent, mode);
   const target = skillTarget(agent);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   if (fs.existsSync(target)) {
@@ -32,9 +49,11 @@ function installOne(agent, mode, update) {
     if (stat.isSymbolicLink()) fs.unlinkSync(target);
     else fs.rmSync(target, { recursive: true, force: true });
   }
-  if (mode === "copy") fs.cpSync(bundledSkill, target, { recursive: true });
-  else fs.symlinkSync(bundledSkill, target, process.platform === "win32" ? "junction" : "dir");
-  return { agent, target, mode };
+  if (effectiveMode === "copy") {
+    fs.cpSync(bundledSkill, target, { recursive: true });
+    writeRuntimeManifest(target);
+  } else fs.symlinkSync(bundledSkill, target, process.platform === "win32" ? "junction" : "dir");
+  return { agent, target, mode: effectiveMode, source: bundledSkill };
 }
 
 export function skillInstall(selected = "all", mode = "link", update = false) {

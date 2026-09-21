@@ -21,7 +21,7 @@ const CAPABILITIES = {
   commands: ["version", "capabilities", "doctor", "settings", "target", "connection", "worker", "model", "job", "process", "skill", "update"],
   automatic_updates: { enabled_by_default: true, registry_check_hours: 6, refreshes_installed_skills: true },
   presets: [{ id: PRESET, model: "prob-4", output: "aspect-preserving 1080p", fps: "source", concurrency: 1 }],
-  agents: { codex: "tested", sealseek: "implemented" },
+  agents: { codex: "tested", sealseek_windows: "tested" },
   worker_os: ["windows"],
   transport: ["ssh", "sftp"]
 };
@@ -159,7 +159,14 @@ async function doctor(requestedTarget) {
     const result = await run(command, args);
     const detail = (result.stdout || result.stderr).trim().split("\n")[0];
     const ok = result.code === 0 || (command === "sftp" && /usage:\s*sftp/i.test(result.stderr));
-    checks.push({ id: `local.${command}`, ok, detail });
+    checks.push({
+      id: `local.${command}`,
+      ok,
+      detail,
+      resolved_command: result.resolvedCommand,
+      resolution: result.resolution,
+      timed_out: Boolean(result.timedOut)
+    });
   }
   checks.push({ id: "config", ok: fs.existsSync(configPath()), detail: configPath() });
   if (requestedTarget || fs.existsSync(configPath())) {

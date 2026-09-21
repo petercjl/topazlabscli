@@ -45,3 +45,15 @@ test("registry failure warns without blocking the command", async () => {
   assert.equal(result.warning, "offline");
   assert.equal(result.updated, undefined);
 });
+
+test("missing npm warns without blocking the command", async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "topazlabscli-update-missing-"));
+  const result = await maybeAutoUpdate(["doctor"], { name: "@example/topaz", version: "0.1.1" }, {
+    env: {},
+    stateFile: path.join(temporary, "state.json"),
+    loadConfig: () => ({ settings: { auto_update: true, update_check_hours: 6 } }),
+    run: async () => { throw new Error("spawn npm ENOENT"); }
+  });
+  assert.match(result.warning, /spawn npm ENOENT/);
+  assert.equal(result.updated, undefined);
+});

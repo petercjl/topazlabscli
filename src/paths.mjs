@@ -1,4 +1,5 @@
 import os from "node:os";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,13 +22,22 @@ export function updateStatePath() {
   return path.join(path.dirname(configPath()), "update-state.json");
 }
 
-export function skillTarget(agent) {
-  const home = os.homedir();
+export function skillTarget(agent, options = {}) {
+  const home = options.home || os.homedir();
+  const env = options.env || process.env;
+  const platform = options.platform || process.platform;
+  const exists = options.exists || fs.existsSync;
+  const pathApi = platform === "win32" ? path.win32 : path;
   if (agent === "codex") {
-    return path.join(process.env.CODEX_HOME || path.join(home, ".codex"), "skills", "topazlabscli");
+    return pathApi.join(env.CODEX_HOME || pathApi.join(home, ".codex"), "skills", "topazlabscli");
   }
   if (agent === "sealseek") {
-    return path.join(process.env.SEALSEEK_SKILLS_HOME || path.join(home, ".agents", "skills"), "topazlabscli");
+    if (env.SEALSEEK_SKILLS_HOME) return pathApi.join(env.SEALSEEK_SKILLS_HOME, "topazlabscli");
+    const workspace = pathApi.join(home, ".sealseek", "workspace");
+    const root = platform === "win32" && (exists(workspace) || exists(pathApi.dirname(workspace)))
+      ? pathApi.join(workspace, "skills")
+      : pathApi.join(home, ".agents", "skills");
+    return pathApi.join(root, "topazlabscli");
   }
   throw new Error(`Unknown Agent: ${agent}`);
 }
