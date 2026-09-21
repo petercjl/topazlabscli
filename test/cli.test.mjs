@@ -4,13 +4,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { defaultOutputPath } from "../src/cli.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const bin = path.join(root, "bin", "topazlabscli.mjs");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
 function cli(args, env = {}) {
-  return spawnSync(process.execPath, [bin, ...args], { encoding: "utf8", env: { ...process.env, ...env } });
+  return spawnSync(process.execPath, [bin, ...args], { encoding: "utf8", env: { ...process.env, TOPAZLABSCLI_AUTO_UPDATE: "off", ...env } });
 }
 
 test("version and capabilities are machine-readable", () => {
@@ -40,4 +41,18 @@ test("unknown command returns a structured error", () => {
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.ok, false);
   assert.equal(payload.error.code, "COMMAND_UNKNOWN");
+});
+
+test("automatic update settings are persisted", () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "topazlabscli-settings-"));
+  const config = path.join(temporary, "config.json");
+  const changed = cli(["settings", "set", "auto-update", "off", "--json"], { TOPAZLABSCLI_CONFIG: config });
+  assert.equal(changed.status, 0, changed.stderr);
+  const shown = cli(["settings", "show", "--json"], { TOPAZLABSCLI_CONFIG: config });
+  assert.equal(JSON.parse(shown.stdout).data.auto_update, false);
+});
+
+test("process derives a predictable 1080p output path", () => {
+  const result = defaultOutputPath(path.join("C:", "Videos", "input.mp4"));
+  assert.equal(path.basename(result), "input-topaz-1080p.mp4");
 });

@@ -15,6 +15,8 @@ npm install --global @petercjl/topazlabscli
 topazlabscli skill install --agent all
 ```
 
+The CLI checks npm for a newer stable release before operational commands, at most once every six hours. When an update is available it upgrades itself, refreshes installed Agent Skills, and then resumes the original command. A temporary npm outage does not block video processing. `topazlabscli update` forces an immediate manual update.
+
 ## Configure a target
 
 Use one or more SSH endpoints in priority order. A LAN-only user configures only the LAN entry.
@@ -56,8 +58,10 @@ The worker uses a global Windows mutex and one queue consumer, so jobs from mult
 ## Process a video
 
 ```powershell
-topazlabscli process .\input.mp4 --output .\output-1080p.mp4 --json
+topazlabscli process .\input.mp4 --json
 ```
+
+Without `--output`, the CLI writes `input-topaz-1080p.mp4` beside the source video. An explicit `--output` remains available for automation.
 
 Asynchronous form:
 
@@ -68,7 +72,7 @@ topazlabscli job wait JOB_ID --json
 topazlabscli job download JOB_ID --output .\output-1080p.mp4 --json
 ```
 
-Version 0.1 includes one preset: `seedance-human-1080p`, using Proteus v4 (`prob-4`), source FPS, aspect-preserving 1080p output, and NVIDIA H.264 encoding.
+Version 0.2 includes one preset: `seedance-human-1080p`, using Proteus v4 (`prob-4`), source FPS, aspect-preserving 1080p output, and NVIDIA H.264 encoding.
 
 ## Configuration
 

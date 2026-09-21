@@ -6,13 +6,13 @@
   "capabilities": [
     {
       "id": "command.execute",
-      "purpose": "Run the stable topazlabscli executable and parse JSON results.",
+      "purpose": "Run the stable, self-updating topazlabscli executable and parse JSON results.",
       "required": true,
       "required_features": ["local-process", "stdout-json", "exit-code"],
       "input_fields": ["argv"],
       "output_fields": ["ok", "data", "error"],
       "side_effects": {
-        "external_mutation": "May upload videos and enqueue remote processing only when the user requests processing.",
+        "external_mutation": "May update the installed npm package and Agent Skill before a command; may upload videos and enqueue remote processing only when the user requests processing.",
         "may_cost_money": false,
         "authorization": "Requires the user's configured SSH access and an explicit processing request."
       },

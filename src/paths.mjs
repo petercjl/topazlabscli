@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const packageRoot = path.resolve(here, "..");
+export const binScript = path.join(packageRoot, "bin", "topazlabscli.mjs");
 export const bundledSkill = path.join(packageRoot, "skill", "topazlabscli");
 export const workerScript = path.join(packageRoot, "worker", "windows", "topazlabs-worker.ps1");
 
@@ -13,6 +14,11 @@ export function configPath() {
     ? (process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"))
     : (process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"));
   return path.join(base, "topazlabscli", "config.json");
+}
+
+export function updateStatePath() {
+  if (process.env.TOPAZLABSCLI_UPDATE_STATE) return path.resolve(process.env.TOPAZLABSCLI_UPDATE_STATE);
+  return path.join(path.dirname(configPath()), "update-state.json");
 }
 
 export function skillTarget(agent) {

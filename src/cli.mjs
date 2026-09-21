@@ -8,6 +8,7 @@ import { CliError, requireValue } from "./errors.mjs";
 import { run } from "./process.mjs";
 import { psLiteral, runPowerShell, selectEndpoint, sftpGet, sftpPut, startPowerShellDetached } from "./ssh.mjs";
 import { skillInstall, skillSource, skillStatus } from "./skill.mjs";
+import { maybeAutoUpdate } from "./update.mjs";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
@@ -17,7 +18,8 @@ const CAPABILITIES = {
   schema_version: 1,
   package: pkg.name,
   version: pkg.version,
-  commands: ["version", "capabilities", "doctor", "target", "connection", "worker", "model", "job", "process", "skill", "update"],
+  commands: ["version", "capabilities", "doctor", "settings", "target", "connection", "worker", "model", "job", "process", "skill", "update"],
+  automatic_updates: { enabled_by_default: true, registry_check_hours: 6, refreshes_installed_skills: true },
   presets: [{ id: PRESET, model: "prob-4", output: "aspect-preserving 1080p", fps: "source", concurrency: 1 }],
   agents: { codex: "tested", sealseek: "implemented" },
   worker_os: ["windows"],
@@ -58,6 +60,7 @@ function help() {
   return `topazlabscli ${pkg.version}\n\n` +
     `Commands:\n` +
     `  version | capabilities | doctor\n` +
+    `  settings show | set auto-update <on|off> | set update-check-hours <hours>\n` +
     `  target add <name> --endpoint <label=host>... --user <user> [--identity <path>] [--workspace <windows-path>] [--default]\n` +
     `  target list\n` +
     `  connection check [--target <name>]\n` +
@@ -66,7 +69,7 @@ function help() {
     `  job submit <video> [--target <name>] [--preset ${PRESET}]\n` +
     `  job list [--target <name>]\n` +
     `  job status|wait|download|cancel <job-id> [--target <name>] [--output <path>]\n` +
-    `  process <video> --output <path> [--target <name>]\n` +
+    `  process <video> [--output <path>] [--target <name>]\n` +
     `  skill source|status|install|update [--agent codex|sealseek|all] [--copy]\n` +
     `  update\n\nUse --json for machine-readable output.`;
 }
@@ -143,6 +146,12 @@ async function downloadJob(id, requestedTarget, outputPath) {
   return { id, target: target.name, endpoint: endpoint.name, output: destination };
 }
 
+export function defaultOutputPath(inputPath) {
+  const resolved = path.resolve(inputPath);
+  const extension = path.extname(resolved) || ".mp4";
+  return path.join(path.dirname(resolved), `${path.basename(resolved, path.extname(resolved))}-topaz-1080p${extension}`);
+}
+
 async function doctor(requestedTarget) {
   const checks = [];
   for (const command of ["ssh", "sftp", "node", "npm"]) {
@@ -177,6 +186,37 @@ export async function main(rawArgs) {
   const command = args.shift();
   if (command === "version" || command === "--version" || command === "-V") return output(pkg.version, json);
   if (command === "capabilities") return output(CAPABILITIES, json);
+
+  if (!["update", "settings"].includes(command)) {
+    const update = await maybeAutoUpdate(rawArgs, pkg);
+    if (update.warning) process.stderr.write(`[AUTO_UPDATE_WARNING] ${update.warning}\n`);
+    if (update.reexecuted) {
+      process.exitCode = update.exitCode;
+      return;
+    }
+  }
+
+  if (command === "settings") {
+    const action = args.shift() || "show";
+    const config = loadConfig();
+    if (action === "show") return output(config.settings, json);
+    if (action === "set") {
+      const name = requireValue(args.shift(), "SETTING_REQUIRED", "settings set requires a setting name.");
+      const value = requireValue(args.shift(), "VALUE_REQUIRED", `settings set ${name} requires a value.`);
+      if (name === "auto-update") {
+        if (!["on", "off"].includes(value)) throw new CliError("SETTING_INVALID", "auto-update must be on or off.");
+        config.settings.auto_update = value === "on";
+      } else if (name === "update-check-hours") {
+        const hours = Number(value);
+        if (!Number.isFinite(hours) || hours < 0) throw new CliError("SETTING_INVALID", "update-check-hours must be zero or a positive number.");
+        config.settings.update_check_hours = hours;
+      } else throw new CliError("SETTING_UNKNOWN", `Unknown setting: ${name}`);
+      const saved = saveConfig(config);
+      return output({ path: saved, settings: config.settings }, json);
+    }
+    throw new CliError("COMMAND_UNKNOWN", `Unknown settings action: ${action}`);
+  }
+
   if (command === "doctor") return output(await doctor(option(args, "--target")), json);
 
   if (command === "target") {
@@ -253,7 +293,7 @@ export async function main(rawArgs) {
 
   if (command === "process") {
     const input = requireValue(args.shift(), "INPUT_REQUIRED", "process requires a video.");
-    const destination = requireValue(option(args, "--output"), "OUTPUT_REQUIRED", "process requires --output.");
+    const destination = option(args, "--output") || defaultOutputPath(input);
     const requested = option(args, "--target");
     const submitted = await submitJob(input, requested, option(args, "--preset") || PRESET);
     const finished = await waitJob(submitted.id, requested, Number(option(args, "--interval") || 10), Number(option(args, "--timeout") || 86400));

@@ -8,7 +8,7 @@
       "implementation": { "kind": "cli", "command": "topazlabscli" },
       "features": ["local-process", "stdout-json", "exit-code"],
       "status": "implemented",
-      "configuration": ["topazlabscli must resolve from PATH"],
+      "configuration": ["topazlabscli must resolve from PATH", "The bundled topazlabscli Skill must be installed through the CLI"],
       "permissions": ["local process execution", "network access to configured SSH target"],
       "normalization": "Invoke with --json and consume {ok,data,error}."
     },

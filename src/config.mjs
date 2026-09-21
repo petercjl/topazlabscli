@@ -4,7 +4,12 @@ import { configPath } from "./paths.mjs";
 import { CliError } from "./errors.mjs";
 
 export function emptyConfig() {
-  return { schema_version: 1, default_target: null, targets: {} };
+  return {
+    schema_version: 1,
+    default_target: null,
+    targets: {},
+    settings: { auto_update: true, update_check_hours: 6 }
+  };
 }
 
 export function loadConfig({ required = false } = {}) {
@@ -18,7 +23,15 @@ export function loadConfig({ required = false } = {}) {
     if (parsed.schema_version !== 1 || typeof parsed.targets !== "object") {
       throw new Error("unsupported configuration schema");
     }
-    return parsed;
+    return {
+      ...parsed,
+      settings: {
+        auto_update: parsed.settings?.auto_update !== false,
+        update_check_hours: Number.isFinite(parsed.settings?.update_check_hours)
+          ? parsed.settings.update_check_hours
+          : 6
+      }
+    };
   } catch (error) {
     throw new CliError("CONFIG_INVALID", `Cannot read configuration: ${error.message}`, { path: filename });
   }
