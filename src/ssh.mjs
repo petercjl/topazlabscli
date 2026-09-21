@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { run } from "./process.mjs";
 import { resolveExecutable } from "./runtime.mjs";
 import { CliError } from "./errors.mjs";
@@ -20,20 +19,15 @@ export function encodePowerShell(script) {
   return Buffer.from(script, "utf16le").toString("base64");
 }
 
-export async function runPowerShell(target, endpoint, script, { timeout = 7 } = {}) {
-  const args = [...commonArgs(target, endpoint, { timeout }), destination(target, endpoint),
-    "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(script)];
-  return run("ssh", args, { timeoutMs: (timeout + 3) * 1000 });
+export function powerShellCommand(script) {
+  const encoded = encodePowerShell(script);
+  return `"&([scriptblock]::Create([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encoded}'))))"`;
 }
 
-export function startPowerShellDetached(target, endpoint, script) {
-  const args = [...commonArgs(target, endpoint, { timeout: 10 }), destination(target, endpoint),
-    "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(script)];
-  const executable = resolveExecutable("ssh");
-  const child = spawn(executable.command, [...executable.argsPrefix, ...args], { detached: true, stdio: "ignore", windowsHide: true });
-  child.on("error", () => {});
-  child.unref();
-  return child.pid;
+export async function runPowerShell(target, endpoint, script, { timeout = 7 } = {}) {
+  const args = [...commonArgs(target, endpoint, { timeout }), destination(target, endpoint),
+    "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", powerShellCommand(script)];
+  return run("ssh", args, { timeoutMs: (timeout + 3) * 1000 });
 }
 
 export async function selectEndpoint(target) {

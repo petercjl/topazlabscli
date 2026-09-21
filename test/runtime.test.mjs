@@ -5,6 +5,7 @@ import { run } from "../src/process.mjs";
 import { resolveExecutable } from "../src/runtime.mjs";
 import { skillTarget } from "../src/paths.mjs";
 import { effectiveSkillMode } from "../src/skill.mjs";
+import { powerShellCommand } from "../src/ssh.mjs";
 
 test("Windows SealSeek resolves npm through its managed Node runtime", () => {
   const execPath = "C:\\Users\\employee\\.sealseek\\binaries\\node\\versions\\22.22.2\\node.exe";
@@ -62,4 +63,11 @@ test("process execution has a hard timeout", async () => {
   const result = await run("node", ["-e", "setTimeout(() => {}, 5000)"], { timeoutMs: 50 });
   assert.equal(result.timedOut, true);
   assert.notEqual(result.code, 0);
+});
+
+test("remote PowerShell uses a quoted Command wrapper around base64 source", () => {
+  const command = powerShellCommand("[Console]::Out.Write('ok')");
+  assert.match(command, /^"&\(\[scriptblock\]::Create\(/);
+  assert.match(command, /FromBase64String\('[A-Za-z0-9+/=]+'\)/);
+  assert.match(command, /\)\)"$/);
 });

@@ -6,13 +6,15 @@ import { loadConfig, saveConfig, resolveTarget } from "./config.mjs";
 import { configPath, workerScript } from "./paths.mjs";
 import { CliError, requireValue } from "./errors.mjs";
 import { run } from "./process.mjs";
-import { psLiteral, runPowerShell, selectEndpoint, sftpGet, sftpPut, startPowerShellDetached } from "./ssh.mjs";
+import { probeMp4Dimensions } from "./media.mjs";
+import { psLiteral, runPowerShell, selectEndpoint, sftpGet, sftpPut } from "./ssh.mjs";
 import { skillInstall, skillSource, skillStatus } from "./skill.mjs";
 import { installLatestPackage, maybeAutoUpdate, queryLatestVersion, updateRegistryWarning } from "./update.mjs";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
 const PRESET = "seedance-human-1080p";
+const WORKER_VERSION = "0.2.0";
 
 const CAPABILITIES = {
   schema_version: 1,
@@ -99,10 +101,10 @@ function parseRemoteJson(result, code = "REMOTE_ERROR") {
   catch { throw new CliError("REMOTE_OUTPUT_INVALID", "Remote worker did not return valid JSON.", { output: text }); }
 }
 
-async function remoteAction(target, endpoint, action, params = {}) {
+async function remoteAction(target, endpoint, action, params = {}, { timeout = 7 } = {}) {
   const encoded = Buffer.from(JSON.stringify(params), "utf8").toString("base64");
   const extra = Object.keys(params).length ? `-PayloadBase64 ${psLiteral(encoded)}` : "";
-  return parseRemoteJson(await runPowerShell(target, endpoint, workerInvocation(remoteRoot(target), action, extra)));
+  return parseRemoteJson(await runPowerShell(target, endpoint, workerInvocation(remoteRoot(target), action, extra), { timeout }));
 }
 
 async function getConnectedTarget(requested) {
@@ -111,18 +113,44 @@ async function getConnectedTarget(requested) {
   return { target, ...selected };
 }
 
+async function installWorker(target, endpoint) {
+  const root = remoteRoot(target);
+  const remote = `${root}\\.topazlabscli\\worker\\topazlabs-worker.ps1`;
+  const workerDirectory = `${root}\\.topazlabscli\\worker`;
+  const prep = `$p=${psLiteral(workerDirectory)}; New-Item -ItemType Directory -Force -Path $p | Out-Null; [Console]::Out.Write('{"ok":true}')`;
+  parseRemoteJson(await runPowerShell(target, endpoint, prep));
+  await sftpPut(target, endpoint, workerScript, remote);
+  return remoteAction(target, endpoint, "Install");
+}
+
+async function ensureWorker(target, endpoint) {
+  let status = null;
+  try { status = await remoteAction(target, endpoint, "Status"); }
+  catch { /* Install or repair the worker below. */ }
+  if (!status?.installed || status.worker_version !== WORKER_VERSION) return installWorker(target, endpoint);
+  return status;
+}
+
 async function submitJob(inputPath, requestedTarget, preset = PRESET) {
   const input = path.resolve(inputPath);
   if (!fs.existsSync(input) || !fs.statSync(input).isFile()) throw new CliError("INPUT_NOT_FOUND", `Video not found: ${input}`);
   if (preset !== PRESET) throw new CliError("PRESET_UNSUPPORTED", `Unsupported preset: ${preset}`);
+  let source;
+  try { source = probeMp4Dimensions(input); }
+  catch (error) { throw new CliError("INPUT_METADATA_UNSUPPORTED", `Could not read MP4 video dimensions: ${error.message}`); }
   const { target, endpoint, attempts } = await getConnectedTarget(requestedTarget);
   const id = `${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${crypto.randomBytes(3).toString("hex")}`;
   const safeName = path.basename(input).replace(/[^A-Za-z0-9._-]/g, "_");
+  const worker = await ensureWorker(target, endpoint);
   const prepared = await remoteAction(target, endpoint, "Prepare", { id, input_name: safeName });
   await sftpPut(target, endpoint, input, prepared.input_path);
-  const job = await remoteAction(target, endpoint, "Enqueue", { id, input_name: safeName, preset });
-  const runnerPid = startPowerShellDetached(target, endpoint, workerInvocation(remoteRoot(target), "Run"));
-  return { ...job, target: target.name, endpoint: endpoint.name, runner_pid: runnerPid, connection_attempts: attempts };
+  const job = await remoteAction(target, endpoint, "Enqueue", { id, input_name: safeName, preset, source_width: source.width, source_height: source.height });
+  return { ...job, target: target.name, endpoint: endpoint.name, worker_version: worker.worker_version, connection_attempts: attempts };
+}
+
+async function runQueue(requestedTarget, timeoutSeconds = 86400) {
+  const { target, endpoint } = await getConnectedTarget(requestedTarget);
+  return { ...(await remoteAction(target, endpoint, "Run", {}, { timeout: timeoutSeconds })), target: target.name, endpoint: endpoint.name };
 }
 
 async function waitJob(id, requestedTarget, intervalSeconds = 10, timeoutSeconds = 86400) {
@@ -271,13 +299,7 @@ export async function main(rawArgs) {
     const requested = option(args, "--target");
     const { target, endpoint, attempts } = await getConnectedTarget(requested);
     if (action === "install") {
-      const root = remoteRoot(target);
-      const remote = `${root}\\.topazlabscli\\worker\\topazlabs-worker.ps1`;
-      const workerDirectory = `${root}\\.topazlabscli\\worker`;
-      const prep = `$p=${psLiteral(workerDirectory)}; New-Item -ItemType Directory -Force -Path $p | Out-Null; [Console]::Out.Write('{"ok":true}')`;
-      parseRemoteJson(await runPowerShell(target, endpoint, prep));
-      await sftpPut(target, endpoint, workerScript, remote);
-      const installed = await remoteAction(target, endpoint, "Install");
+      const installed = await installWorker(target, endpoint);
       return output({ ...installed, target: target.name, endpoint: endpoint.name, connection_attempts: attempts }, json);
     }
     if (action === "status") return output(await remoteAction(target, endpoint, "Status"), json);
@@ -303,7 +325,12 @@ export async function main(rawArgs) {
       const { target, endpoint } = await getConnectedTarget(requested);
       return output(await remoteAction(target, endpoint, "JobStatus", { id }), json);
     }
-    if (action === "wait") return output(await waitJob(id, requested, Number(option(args, "--interval") || 10), Number(option(args, "--timeout") || 86400)), json);
+    if (action === "wait") {
+      const timeout = Number(option(args, "--timeout") || 86400);
+      const interval = Number(option(args, "--interval") || 10);
+      await runQueue(requested, timeout);
+      return output(await waitJob(id, requested, interval, timeout), json);
+    }
     if (action === "download") return output(await downloadJob(id, requested, option(args, "--output")), json);
     if (action === "cancel") {
       const { target, endpoint } = await getConnectedTarget(requested);
@@ -316,10 +343,12 @@ export async function main(rawArgs) {
     const input = requireValue(args.shift(), "INPUT_REQUIRED", "process requires a video.");
     const destination = option(args, "--output") || defaultOutputPath(input);
     const requested = option(args, "--target");
+    const timeout = Number(option(args, "--timeout") || 86400);
     const submitted = await submitJob(input, requested, option(args, "--preset") || PRESET);
-    const finished = await waitJob(submitted.id, requested, Number(option(args, "--interval") || 10), Number(option(args, "--timeout") || 86400));
+    const runner = await runQueue(requested, timeout);
+    const finished = await waitJob(submitted.id, requested, Number(option(args, "--interval") || 10), timeout);
     if (finished.state !== "completed") throw new CliError("JOB_FAILED", `Job ${submitted.id} ended as ${finished.state}.`, finished);
-    return output({ submitted, finished, downloaded: await downloadJob(submitted.id, requested, destination) }, json);
+    return output({ submitted, runner, finished, downloaded: await downloadJob(submitted.id, requested, destination) }, json);
   }
 
   if (command === "skill") {

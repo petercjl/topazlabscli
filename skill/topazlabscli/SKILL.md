@@ -32,12 +32,15 @@ Use the CLI as the single execution surface. Do not reproduce SSH, SFTP, queue, 
 - Connection failure: report `CONNECTION_FAILED` and the endpoint attempts. The CLI does not start, reconfigure, or grant access to a VPN.
 - Worker/model not ready: run `worker status` or `model status`; stop with the returned dependency error. Installing/licensing Topaz and downloading models remain GUI administration tasks.
 - Long-running work: use `job submit`, return the job ID, then `job wait` when the user asks to remain attached. Do not resubmit merely because a wait timed out.
+- Remote runner loss: `process` and `job wait` keep the queue runner attached through the active SSH command instead of relying on a detached client process. `job status` and `job wait` convert an abandoned `running` record into a terminal `WORKER_LOST` failure. Report it and resubmit only when the user requests another processing attempt.
 - Cancellation: queued work may cancel immediately. A running task records a cancellation request but is not forcibly killed in version 0.2.
 - Missing capability: return `CAPABILITY_UNAVAILABLE` or the CLI's structured error. Do not invent a platform-specific workaround.
 
 ## Configuration and Safety
 
 Configuration, hostnames, addresses, usernames, SSH identities, VPN details, media, Topaz binaries, models, and credentials are external to this Skill and npm package. Installation does not grant access to a workstation. Treat the configured server and Topaz license as user-managed resources.
+
+Before submitting a job, the CLI compares the remote worker version with its bundled worker and upgrades the remote worker when required. Queue execution stays attached to the invoking CLI command; the Agent must wait for the command's terminal JSON result and must not background or abandon it.
 
 Before operational commands, the CLI performs a cached npm update check. It tries the user's current npm registry and then its built-in reachable-registry fallback without changing the user's global npm configuration. The exact version returned by that check is fully downloaded from the same registry before the installed version is touched, then installed Agent Skills are refreshed and the original command resumes under the new version. The CLI resolves npm through the running Agent's Node installation when PATH is restricted. Registry, npm, and Skill-refresh failures produce a warning and continue with the installed version. Treat `doctor`'s `updates.registry` check as advisory; a failed update source does not make video processing unavailable.
 

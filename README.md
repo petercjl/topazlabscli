@@ -55,7 +55,7 @@ topazlabscli doctor --json
 topazlabscli model status --json
 ```
 
-The worker uses a global Windows mutex and one queue consumer, so jobs from multiple clients run serially.
+The CLI automatically upgrades the remote worker when the bundled worker version changes. `process` and `job wait` keep the queue runner attached to the active SSH command, while a global mutex and one queue consumer serialize jobs from multiple clients. This avoids Windows Agent runtimes terminating a detached SSH child. An abandoned `running` record is converted to a terminal `WORKER_LOST` failure instead of waiting forever.
 
 ## Process a video
 
@@ -74,7 +74,7 @@ topazlabscli job wait JOB_ID --json
 topazlabscli job download JOB_ID --output .\output-1080p.mp4 --json
 ```
 
-Version 0.2 includes one preset: `seedance-human-1080p`, using Proteus v4 (`prob-4`), source FPS, aspect-preserving 1080p output, and NVIDIA H.264 encoding.
+Version 0.2 includes one preset: `seedance-human-1080p`, using Proteus v4 (`prob-4`), source FPS, aspect-preserving 1080p output, and NVIDIA H.264 encoding. The client reads MP4 track dimensions before upload so the worker does not depend on launching Topaz's bundled FFprobe through a remote shell.
 
 ## Configuration
 

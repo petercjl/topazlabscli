@@ -8,12 +8,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$WorkerVersion = '0.1.1'
+$WorkerVersion = '0.2.0'
 $StateRoot = Join-Path $Root '.topazlabscli'
 $QueueRoot = Join-Path $StateRoot 'queue'
 $JobsRoot = Join-Path $StateRoot 'jobs'
 $WorkerRoot = Join-Path $StateRoot 'worker'
 $ConfigPath = Join-Path $StateRoot 'worker-config.json'
+$RunnerStatePath = Join-Path $StateRoot 'runner.json'
 
 function Write-Json($Value) {
   [Console]::Out.Write(($Value | ConvertTo-Json -Depth 8 -Compress))
@@ -77,6 +78,34 @@ function Get-ModelStatus($Config) {
   }
 }
 
+function Test-JobProcessActive([string]$Id) {
+  $escaped = [Regex]::Escape($Id)
+  return $null -ne (Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -match '^(ffmpeg|ffprobe)\.exe$' -and $_.CommandLine -match $escaped
+  } | Select-Object -First 1)
+}
+
+function Test-RunnerProcessActive {
+  if (-not (Test-Path -LiteralPath $RunnerStatePath)) { return $false }
+  try {
+    $runner = Get-Content -Raw -LiteralPath $RunnerStatePath | ConvertFrom-Json
+    $process = Get-Process -Id ([int]$runner.pid) -ErrorAction SilentlyContinue
+    return ($null -ne $process -and $process.ProcessName -eq 'powershell')
+  } catch { return $false }
+}
+
+function Repair-StaleJobs {
+  if (Test-RunnerProcessActive) { return }
+  Get-ChildItem -LiteralPath $JobsRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    $statusPath = Join-Path $_.FullName 'status.json'
+    if (-not (Test-Path -LiteralPath $statusPath)) { return }
+    $status = Get-Content -Raw -LiteralPath $statusPath | ConvertFrom-Json
+    if ($status.state -eq 'running' -and -not (Test-JobProcessActive ([string]$status.id))) {
+      Set-JobStatus ([string]$status.id) @{ state = 'failed'; completed_at = (Get-Date).ToUniversalTime().ToString('o'); error_code = 'WORKER_LOST'; error = 'The remote queue runner exited before the job completed. Resubmit the job.' } | Out-Null
+    }
+  }
+}
+
 function Invoke-Job($Job, $Config) {
   $id = [string]$Job.id
   $jobDir = Job-Directory $id
@@ -89,11 +118,9 @@ function Invoke-Job($Job, $Config) {
   if (-not (Test-Path -LiteralPath $Config.ffmpeg)) { throw "Topaz ffmpeg is missing: $($Config.ffmpeg)" }
 
   Set-JobStatus $id @{ state = 'running'; started_at = (Get-Date).ToUniversalTime().ToString('o'); input_path = $inputPath; output_path = $outputPath; output_name = $outputName; preset = $Job.preset } | Out-Null
-  $probeText = & $Config.ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of json -- $inputPath
-  if ($LASTEXITCODE -ne 0) { throw 'ffprobe failed.' }
-  $probe = $probeText | ConvertFrom-Json
-  $width = [int]$probe.streams[0].width
-  $height = [int]$probe.streams[0].height
+  $width = [int]$Job.source_width
+  $height = [int]$Job.source_height
+  if ($width -le 0 -or $height -le 0) { throw 'Source dimensions are missing from the queued job.' }
   if ($width -ge $height) {
     $targetHeight = 1080
     $targetWidth = [int](2 * [Math]::Round((1080.0 * $width / $height) / 2.0))
@@ -140,8 +167,9 @@ switch ($Action) {
     $current = Read-WorkerConfig
     $current.worker_version = $WorkerVersion
     $current | ConvertTo-Json | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+    Repair-StaleJobs
     $model = Get-ModelStatus $current
-    Write-Json @{ ok = $true; installed = $true; worker_version = $WorkerVersion; root = $Root; model_ready = $model.model_ready }
+    Write-Json @{ ok = $true; installed = $true; worker_version = $WorkerVersion; root = $Root; runner = 'attached-ssh'; model_ready = $model.model_ready }
   }
   'Status' {
     $installed = Test-Path -LiteralPath $ConfigPath
@@ -178,12 +206,17 @@ switch ($Action) {
   'Run' {
     $created = $false
     $mutex = New-Object Threading.Mutex($true, 'Global\TopazLabsCliQueue', [ref]$created)
-    if (-not $created) { exit 0 }
+    if (-not $created) { Write-Json @{ ok = $true; runner = 'attached-ssh'; state = 'already-running' }; exit 0 }
     try {
+      @{ pid = $PID; started_at = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content -LiteralPath $RunnerStatePath -Encoding UTF8
       $config = Read-WorkerConfig
       while ($true) {
         $next = Get-ChildItem -LiteralPath $QueueRoot -Filter '*.json' | Sort-Object CreationTimeUtc, Name | Select-Object -First 1
-        if ($null -eq $next) { break }
+        if ($null -eq $next) {
+          Start-Sleep -Seconds 2
+          $next = Get-ChildItem -LiteralPath $QueueRoot -Filter '*.json' | Sort-Object CreationTimeUtc, Name | Select-Object -First 1
+          if ($null -eq $next) { break }
+        }
         $job = Get-Content -Raw -LiteralPath $next.FullName | ConvertFrom-Json
         Remove-Item -Force -LiteralPath $next.FullName
         $cancelPath = Join-Path (Job-Directory ([string]$job.id)) 'cancel.requested'
@@ -197,14 +230,17 @@ switch ($Action) {
         }
       }
     } finally {
+      Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $RunnerStatePath
       $mutex.ReleaseMutex()
       $mutex.Dispose()
     }
+    Write-Json @{ ok = $true; runner = 'attached-ssh'; state = 'idle' }
   }
   'JobStatus' {
     $payload = Read-Payload
     $path = Status-Path ([string]$payload.id)
     if (-not (Test-Path -LiteralPath $path)) { throw 'Job not found.' }
+    Repair-StaleJobs
     [Console]::Out.Write((Get-Content -Raw -LiteralPath $path).Trim())
   }
   'ListJobs' {
