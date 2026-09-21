@@ -80,11 +80,24 @@ topazlabscli job wait JOB_ID --json
 topazlabscli job download JOB_ID --output .\output-1080p.mp4 --json
 ```
 
-Version 0.3 includes two bounded presets: `seedance-human-1080p` (default) and `seedance-human-1440p` (QHD/2K). Both use Proteus v4 (`prob-4`), preserve source FPS and aspect ratio, and use NVIDIA H.264 encoding. Both also use the versioned `proteus-auto-v1` tuning policy: Topaz estimates the six Proteus controls from a 20-frame window, the CLI adds no manual relative offsets, and 20% of the original detail is recovered. The resolved tuning policy is written into each job status for auditability.
+The default path includes two bounded presets: `seedance-human-1080p` and `seedance-human-1440p` (QHD/2K). Both use Proteus v4 (`prob-4`), preserve source FPS and aspect ratio, and use NVIDIA H.264 encoding. Both also use the versioned `proteus-auto-v1` tuning policy: Topaz estimates the six Proteus controls from a 20-frame window, the CLI adds no manual relative offsets, and 20% of the original detail is recovered. The resolved tuning policy is written into each job status for auditability.
 
 Raw Proteus parameter injection is intentionally not exposed. New tuning profiles require representative A/B tests and a package release so Agents cannot invent unverified filter values.
 
 The client reads MP4 track dimensions before upload so the worker does not depend on launching Topaz's bundled FFprobe through a remote shell.
+
+## Advanced tuning preview
+
+Advanced tuning is an explicit, non-default branch. It uploads the source once, extracts three representative source ranges, renders the default Auto result and one bounded candidate, and returns source, candidate, side-by-side video, and contact-sheet evidence before the candidate is applied to the full video.
+
+```powershell
+topazlabscli tuning profiles --json
+topazlabscli tuning analyze .\input.mp4 --output-dir .\input-analysis --json
+topazlabscli tuning preview ANALYSIS_ID --profile human-balanced --output-dir .\input-preview --json
+topazlabscli tuning apply ANALYSIS_ID --profile human-balanced --output .\input-topaz-advanced.mp4 --json
+```
+
+The packaged `proteus-advanced-v1` catalog currently provides `human-balanced`, `compression-repair`, `motion-safe`, and `soft-source`. Each remains relative to Proteus Auto and is restricted to narrower package safety bounds than the native Topaz range. The worker rejects unknown profiles and the CLI never accepts raw Proteus values. The preview comparison is ordered source, default Auto, then candidate from left to right.
 
 ## Configuration
 

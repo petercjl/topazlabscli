@@ -1,4 +1,4 @@
 interface:
   display_name: "TopazLabs CLI"
-  short_description: "Queue adaptive 1080p or 2K Topaz enhancement jobs"
-  default_prompt: "Use topazlabscli to check the configured workstation and enhance a video at default 1080p or explicitly requested 2K with automatic Proteus tuning."
+  short_description: "Enhance video with default or reviewed Proteus tuning"
+  default_prompt: "Use topazlabscli to check the configured workstation and enhance a video at default 1080p or explicitly requested 2K. Use Proteus Auto by default; use representative A/B previews and one shipped bounded profile only when advanced tuning is explicitly requested."

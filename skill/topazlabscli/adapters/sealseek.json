@@ -10,10 +10,10 @@
         "command": "topazlabscli",
         "fallback": "Read .topazlabscli-runtime.json from the managed Skill copy and run its bin with its node"
       },
-      "features": ["local-process", "stdout-json", "exit-code", "resolution-selection", "automatic-parameter-tuning"],
+      "features": ["local-process", "stdout-json", "exit-code", "resolution-selection", "automatic-parameter-tuning", "advanced-analysis", "bounded-profile-selection", "ab-preview", "advanced-apply"],
       "status": "implemented",
       "evidence": [
-        "The Windows SealSeek runtime path is tested on the 0.2 line; version 0.3 adds platform-neutral CLI flags and JSON fields but still requires a Windows SealSeek runtime rerun before being labeled tested for those features."
+        "The Windows SealSeek runtime path is tested on the 0.2 line. Version 0.4 adds platform-neutral 2K and advanced-tuning commands, profiles, and JSON fields, but still requires a Windows SealSeek runtime rerun before those features can be labeled tested."
       ],
       "configuration": ["Install the npm package globally", "Install the bundled Skill through the CLI into the SealSeek workspace"],
       "permissions": ["local process execution", "network access to configured SSH target"],

@@ -6,10 +6,10 @@
     {
       "capability_id": "command.execute",
       "implementation": { "kind": "cli", "command": "topazlabscli" },
-      "features": ["local-process", "stdout-json", "exit-code", "resolution-selection", "automatic-parameter-tuning"],
+      "features": ["local-process", "stdout-json", "exit-code", "resolution-selection", "automatic-parameter-tuning", "advanced-analysis", "bounded-profile-selection", "ab-preview", "advanced-apply"],
       "status": "tested",
       "tested_date": "2026-09-21",
-      "evidence": ["Codex ran version 0.3.0 against the Windows worker, processed a 9.024-second source with --resolution 2k, received an auditable proteus-auto-v1 status, downloaded the result, and verified 2560x1440 H.264 video with AAC audio."],
+      "evidence": ["Codex ran version 0.4.0 against the Windows worker on 2026-09-21, generated representative source evidence, rendered default-Auto and bounded-profile previews, applied the human-balanced profile to the original full source, downloaded the result, and separately completed a default-process regression. Version 0.3.0 had already verified 2560x1440 H.264 video with AAC audio."],
       "configuration": ["topazlabscli must resolve from PATH"],
       "permissions": ["local process execution", "network access to configured SSH target"],
       "normalization": "Invoke with --json and consume {ok,data,error}."

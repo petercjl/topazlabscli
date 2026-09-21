@@ -3,18 +3,19 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import { loadConfig, saveConfig, resolveTarget } from "./config.mjs";
-import { configPath, workerScript } from "./paths.mjs";
+import { configPath, tuningCatalog, workerScript } from "./paths.mjs";
 import { CliError, requireValue } from "./errors.mjs";
 import { run } from "./process.mjs";
 import { probeMp4Dimensions } from "./media.mjs";
 import { psLiteral, runPowerShell, selectEndpoint, sftpGet, sftpPut } from "./ssh.mjs";
 import { skillInstall, skillSource, skillStatus } from "./skill.mjs";
 import { installLatestPackage, maybeAutoUpdate, queryLatestVersion, updateRegistryWarning } from "./update.mjs";
+import { loadTuningCatalog, resolveTuningProfile } from "./tuning.mjs";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
 const DEFAULT_PRESET = "seedance-human-1080p";
-const WORKER_VERSION = "0.3.0";
+const WORKER_VERSION = "0.4.0";
 const PRESETS = {
   "seedance-human-1080p": {
     id: "seedance-human-1080p",
@@ -51,7 +52,7 @@ const CAPABILITIES = {
   schema_version: 1,
   package: pkg.name,
   version: pkg.version,
-  commands: ["version", "capabilities", "doctor", "settings", "target", "connection", "worker", "model", "job", "process", "skill", "update"],
+  commands: ["version", "capabilities", "doctor", "settings", "target", "connection", "worker", "model", "job", "process", "tuning", "skill", "update"],
   automatic_updates: { enabled_by_default: true, registry_check_hours: 6, registry_fallback: true, refreshes_installed_skills: true },
   default_preset: DEFAULT_PRESET,
   presets: Object.values(PRESETS),
@@ -62,6 +63,13 @@ const CAPABILITIES = {
     estimate_frames: 20,
     relative_offsets: { preblur: 0, noise: 0, details: 0, halo: 0, blur: 0, compression: 0 },
     recover_original_detail: 0.2
+  },
+  advanced_parameter_tuning: {
+    id: "proteus-advanced-v1",
+    default: false,
+    workflow: ["analyze", "preview", "apply"],
+    profiles: Object.keys(loadTuningCatalog().profiles),
+    raw_parameter_injection: false
   },
   agents: { codex: "tested", sealseek_windows: "implemented" },
   worker_os: ["windows"],
@@ -108,6 +116,10 @@ function help() {
     `  connection check [--target <name>]\n` +
     `  worker install|status [--target <name>]\n` +
     `  model status [--target <name>]\n` +
+    `  tuning profiles\n` +
+    `  tuning analyze <video> [--resolution 1080p|2k] [--output-dir <path>] [--target <name>]\n` +
+    `  tuning preview <analysis-id> --profile <id> [--resolution 1080p|2k] [--output-dir <path>] [--target <name>]\n` +
+    `  tuning apply <analysis-id> --profile <id> [--resolution 1080p|2k] [--output <path>] [--target <name>]\n` +
     `  job submit <video> [--target <name>] [--resolution 1080p|2k] [--preset <id>]\n` +
     `  job list [--target <name>]\n` +
     `  job status|wait|download|cancel <job-id> [--target <name>] [--output <path>]\n` +
@@ -160,6 +172,7 @@ async function installWorker(target, endpoint) {
   const prep = `$p=${psLiteral(workerDirectory)}; New-Item -ItemType Directory -Force -Path $p | Out-Null; [Console]::Out.Write('{"ok":true}')`;
   parseRemoteJson(await runPowerShell(target, endpoint, prep));
   await sftpPut(target, endpoint, workerScript, remote);
+  await sftpPut(target, endpoint, tuningCatalog, `${workerDirectory}\\proteus-advanced-v1.json`);
   return remoteAction(target, endpoint, "Install");
 }
 
@@ -225,6 +238,70 @@ async function downloadJob(id, requestedTarget, outputPath) {
   if (fs.existsSync(destination)) throw new CliError("OUTPUT_EXISTS", `Refusing to overwrite existing output: ${destination}`);
   await sftpGet(target, endpoint, status.output_path, destination);
   return { id, target: target.name, endpoint: endpoint.name, output: destination };
+}
+
+function analysisOutputDirectory(inputPath, id, requested) {
+  if (requested) return path.resolve(requested);
+  const input = path.resolve(inputPath);
+  return path.join(path.dirname(input), `${path.basename(input, path.extname(input))}-topaz-analysis-${id}`);
+}
+
+async function downloadArtifacts(target, endpoint, artifacts, directory) {
+  const destination = path.resolve(directory);
+  if (fs.existsSync(destination)) throw new CliError("OUTPUT_EXISTS", `Refusing to overwrite existing preview directory: ${destination}`);
+  fs.mkdirSync(destination, { recursive: true });
+  const downloaded = [];
+  try {
+    for (const artifact of artifacts || []) {
+      const local = path.join(destination, artifact.name);
+      await sftpGet(target, endpoint, artifact.path, local);
+      downloaded.push({ kind: artifact.kind, path: local });
+    }
+  } catch (error) {
+    error.details = { ...(error.details || {}), partial_output_directory: destination, downloaded };
+    throw error;
+  }
+  return { directory: destination, artifacts: downloaded };
+}
+
+async function analyzeTuning(inputPath, requestedTarget, presetOptions, requestedDirectory) {
+  const input = path.resolve(inputPath);
+  if (!fs.existsSync(input) || !fs.statSync(input).isFile()) throw new CliError("INPUT_NOT_FOUND", `Video not found: ${input}`);
+  const preset = resolvePreset(presetOptions);
+  let source;
+  try { source = probeMp4Dimensions(input); }
+  catch (error) { throw new CliError("INPUT_METADATA_UNSUPPORTED", `Could not read MP4 video dimensions: ${error.message}`); }
+  const { target, endpoint, attempts } = await getConnectedTarget(requestedTarget);
+  const worker = await ensureWorker(target, endpoint);
+  const id = `analysis-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${crypto.randomBytes(3).toString("hex")}`;
+  const safeName = path.basename(input).replace(/[^A-Za-z0-9._-]/g, "_");
+  const prepared = await remoteAction(target, endpoint, "AnalysisPrepare", { id, input_name: safeName });
+  await sftpPut(target, endpoint, input, prepared.input_path);
+  const analysis = await remoteAction(target, endpoint, "AnalysisRun", {
+    id,
+    input_name: safeName,
+    preset: preset.id,
+    source_width: source.width,
+    source_height: source.height
+  }, { timeout: 300 });
+  const downloaded = await downloadArtifacts(target, endpoint, analysis.artifacts, analysisOutputDirectory(input, id, requestedDirectory));
+  return { ...analysis, downloaded, target: target.name, endpoint: endpoint.name, worker_version: worker.worker_version, connection_attempts: attempts };
+}
+
+async function enqueueAdvancedJob(analysisId, profileId, requestedTarget, presetOptions, jobType) {
+  const profile = resolveTuningProfile(profileId);
+  const preset = resolvePreset(presetOptions);
+  const { target, endpoint, attempts } = await getConnectedTarget(requestedTarget);
+  const worker = await ensureWorker(target, endpoint);
+  const id = `${jobType}-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${crypto.randomBytes(3).toString("hex")}`;
+  const job = await remoteAction(target, endpoint, "Enqueue", {
+    id,
+    job_type: jobType,
+    analysis_id: analysisId,
+    preset: preset.id,
+    tuning_profile: profile.id
+  });
+  return { ...job, id, analysis_id: analysisId, preset: preset.id, resolution: preset.resolution, tuning: profile, target: target.name, endpoint: endpoint.name, worker_version: worker.worker_version, connection_attempts: attempts };
 }
 
 export function defaultOutputPath(inputPath, presetOptions = {}) {
@@ -365,6 +442,39 @@ export async function main(rawArgs) {
     const { target, endpoint } = await getConnectedTarget(option(args, "--target"));
     const status = await remoteAction(target, endpoint, "Status");
     return output({ model: "prob-4", ready: status.model_ready, definitions: status.model_definitions, weights: status.model_weights }, json);
+  }
+
+  if (command === "tuning") {
+    const action = args.shift();
+    if (action === "profiles") return output(loadTuningCatalog(), json);
+    const requested = option(args, "--target");
+    const presetOptions = { preset: option(args, "--preset"), resolution: option(args, "--resolution") };
+    if (action === "analyze") {
+      const input = requireValue(args.shift(), "INPUT_REQUIRED", "tuning analyze requires a video.");
+      return output(await analyzeTuning(input, requested, presetOptions, option(args, "--output-dir")), json);
+    }
+    const analysisId = requireValue(args.shift(), "ANALYSIS_ID_REQUIRED", `tuning ${action || ""} requires an analysis id.`);
+    const profile = requireValue(option(args, "--profile"), "TUNING_PROFILE_REQUIRED", `tuning ${action} requires --profile.`);
+    if (action === "preview") {
+      const submitted = await enqueueAdvancedJob(analysisId, profile, requested, presetOptions, "preview");
+      const timeout = Number(option(args, "--timeout") || 3600);
+      const runner = await runQueue(requested, timeout);
+      const finished = await waitJob(submitted.id, requested, Number(option(args, "--interval") || 5), timeout);
+      if (finished.state !== "completed") throw new CliError("PREVIEW_FAILED", `Preview ${submitted.id} ended as ${finished.state}.`, finished);
+      const { target, endpoint } = await getConnectedTarget(requested);
+      const directory = option(args, "--output-dir") || path.resolve(`${analysisId}-${profile}-preview`);
+      const downloaded = await downloadArtifacts(target, endpoint, finished.artifacts, directory);
+      return output({ submitted, runner, finished, downloaded }, json);
+    }
+    if (action === "apply") {
+      const submitted = await enqueueAdvancedJob(analysisId, profile, requested, presetOptions, "advanced-full");
+      const timeout = Number(option(args, "--timeout") || 86400);
+      const runner = await runQueue(requested, timeout);
+      const finished = await waitJob(submitted.id, requested, Number(option(args, "--interval") || 10), timeout);
+      if (finished.state !== "completed") throw new CliError("JOB_FAILED", `Job ${submitted.id} ended as ${finished.state}.`, finished);
+      return output({ submitted, runner, finished, downloaded: await downloadJob(submitted.id, requested, option(args, "--output")) }, json);
+    }
+    throw new CliError("COMMAND_UNKNOWN", `Unknown tuning action: ${action || ""}`);
   }
 
   if (command === "job") {

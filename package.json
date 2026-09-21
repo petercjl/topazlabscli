@@ -1,6 +1,6 @@
 {
   "name": "@petercjl/topazlabscli",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Cross-Agent CLI and portable Skill for queued remote Topaz Video AI processing",
   "type": "module",
   "bin": {
@@ -10,6 +10,7 @@
     "bin",
     "src",
     "worker",
+    "profiles",
     "skill",
     "README.md",
     "LICENSE"
@@ -19,7 +20,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check bin/topazlabscli.mjs && node --check src/cli.mjs && node --check src/media.mjs && node --check src/runtime.mjs && node --check src/ssh.mjs && node --check src/update.mjs && npm test"
+    "check": "node --check bin/topazlabscli.mjs && node --check src/cli.mjs && node --check src/media.mjs && node --check src/runtime.mjs && node --check src/ssh.mjs && node --check src/tuning.mjs && node --check src/update.mjs && npm test"
   },
   "publishConfig": {
     "access": "public",

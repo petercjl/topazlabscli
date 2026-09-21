@@ -8,6 +8,7 @@ export const packageRoot = path.resolve(here, "..");
 export const binScript = path.join(packageRoot, "bin", "topazlabscli.mjs");
 export const bundledSkill = path.join(packageRoot, "skill", "topazlabscli");
 export const workerScript = path.join(packageRoot, "worker", "windows", "topazlabs-worker.ps1");
+export const tuningCatalog = path.join(packageRoot, "profiles", "proteus-advanced-v1.json");
 
 export function configPath() {
   if (process.env.TOPAZLABSCLI_CONFIG) return path.resolve(process.env.TOPAZLABSCLI_CONFIG);

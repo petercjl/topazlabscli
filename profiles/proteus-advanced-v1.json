@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "policy_id": "proteus-advanced-v1",
+  "model": "prob-4",
+  "estimate_frames": 20,
+  "parameter_bounds": {
+    "preblur": [-0.25, 0.25],
+    "noise": [-0.25, 0.25],
+    "details": [-0.25, 0.25],
+    "halo": [-0.25, 0.25],
+    "blur": [-0.25, 0.25],
+    "compression": [-0.25, 0.25],
+    "blend": [0.2, 0.35]
+  },
+  "profiles": {
+    "human-balanced": {
+      "description": "Conservative human-first candidate with extra original-detail recovery.",
+      "relative_offsets": {
+        "preblur": 0,
+        "noise": 0,
+        "details": 0,
+        "halo": 0,
+        "blur": 0,
+        "compression": 0
+      },
+      "blend": 0.3
+    },
+    "compression-repair": {
+      "description": "Low-bitrate or visibly blocky sources; favors artifact cleanup over invented texture.",
+      "relative_offsets": {
+        "preblur": 0,
+        "noise": 0.05,
+        "details": -0.05,
+        "halo": 0,
+        "blur": -0.05,
+        "compression": 0.2
+      },
+      "blend": 0.25
+    },
+    "motion-safe": {
+      "description": "Fast human motion; suppresses aggressive texture and sharpening changes.",
+      "relative_offsets": {
+        "preblur": 0,
+        "noise": 0,
+        "details": -0.1,
+        "halo": 0,
+        "blur": -0.1,
+        "compression": 0.05
+      },
+      "blend": 0.3
+    },
+    "soft-source": {
+      "description": "Soft progressive footage; cautiously increases deblur, detail, and sharpening relative to Auto.",
+      "relative_offsets": {
+        "preblur": 0.1,
+        "noise": 0,
+        "details": 0.1,
+        "halo": 0,
+        "blur": 0.15,
+        "compression": 0.05
+      },
+      "blend": 0.25
+    }
+  }
+}

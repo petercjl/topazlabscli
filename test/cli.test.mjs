@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { defaultOutputPath, resolvePreset } from "../src/cli.mjs";
 import { probeMp4Dimensions } from "../src/media.mjs";
+import { loadTuningCatalog, resolveTuningProfile } from "../src/tuning.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const bin = path.join(root, "bin", "topazlabscli.mjs");
@@ -26,6 +27,8 @@ test("version and capabilities are machine-readable", () => {
   assert.equal(payload.data.presets[0].model, "prob-4");
   assert.deepEqual(payload.data.presets.map((item) => item.resolution), ["1080p", "2k"]);
   assert.equal(payload.data.automatic_parameter_tuning.id, "proteus-auto-v1");
+  assert.equal(payload.data.advanced_parameter_tuning.id, "proteus-advanced-v1");
+  assert.equal(payload.data.advanced_parameter_tuning.default, false);
 });
 
 test("target configuration preserves endpoint order", () => {
@@ -78,10 +81,30 @@ test("unknown resolutions and conflicting preset options are rejected", () => {
 
 test("processing uses an attached remote runner and worker version negotiation", () => {
   const source = fs.readFileSync(path.join(root, "src", "cli.mjs"), "utf8");
-  assert.match(source, /const WORKER_VERSION = "0\.3\.0"/);
+  assert.match(source, /const WORKER_VERSION = "0\.4\.0"/);
   assert.match(source, /await ensureWorker\(target, endpoint\)/);
   assert.match(source, /remoteAction\(target, endpoint, "Run", \{\}, \{ timeout: timeoutSeconds \}\)/);
   assert.doesNotMatch(source, /startPowerShellDetached\(target, endpoint/);
+});
+
+test("advanced profiles are bounded, named, and reject raw or unknown choices", () => {
+  const catalog = loadTuningCatalog();
+  assert.deepEqual(Object.keys(catalog.profiles), ["human-balanced", "compression-repair", "motion-safe", "soft-source"]);
+  assert.equal(resolveTuningProfile("motion-safe").policy_id, "proteus-advanced-v1");
+  assert.throws(() => resolveTuningProfile("raw=1"), { code: "TUNING_PROFILE_UNSUPPORTED" });
+  for (const profile of Object.values(catalog.profiles)) {
+    for (const [name, value] of Object.entries(profile.relative_offsets)) {
+      assert.ok(value >= catalog.parameter_bounds[name][0] && value <= catalog.parameter_bounds[name][1]);
+    }
+  }
+});
+
+test("advanced tuning exposes separate analyze, preview, and apply commands", () => {
+  const result = cli(["help"]);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /tuning analyze <video>/);
+  assert.match(result.stdout, /tuning preview <analysis-id>/);
+  assert.match(result.stdout, /tuning apply <analysis-id>/);
 });
 
 test("MP4 dimensions are read without invoking a remote ffprobe process", () => {
