@@ -8,7 +8,7 @@
       "id": "command.execute",
       "purpose": "Run the stable, self-updating topazlabscli executable and parse JSON results.",
       "required": true,
-      "required_features": ["local-process", "stdout-json", "exit-code"],
+      "required_features": ["local-process", "stdout-json", "exit-code", "resolution-selection", "automatic-parameter-tuning"],
       "input_fields": ["argv"],
       "output_fields": ["ok", "data", "error"],
       "side_effects": {

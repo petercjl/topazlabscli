@@ -63,18 +63,28 @@ The CLI automatically upgrades the remote worker when the bundled worker version
 topazlabscli process .\input.mp4 --json
 ```
 
-Without `--output`, the CLI writes `input-topaz-1080p.mp4` beside the source video. An explicit `--output` remains available for automation.
+Without `--output`, the CLI writes `input-topaz-1080p.mp4` beside the source video. 1080p remains the default. Request an aspect-preserving QHD/2K output with a 1440-pixel short edge using:
+
+```powershell
+topazlabscli process .\input.mp4 --resolution 2k --json
+```
+
+The default 2K output name is `input-topaz-2k.mp4`. Aliases `1440`, `1440p`, and `qhd` are also accepted. An explicit `--output` remains available for automation.
 
 Asynchronous form:
 
 ```powershell
-topazlabscli job submit .\input.mp4 --json
+topazlabscli job submit .\input.mp4 --resolution 2k --json
 topazlabscli job status JOB_ID --json
 topazlabscli job wait JOB_ID --json
 topazlabscli job download JOB_ID --output .\output-1080p.mp4 --json
 ```
 
-Version 0.2 includes one preset: `seedance-human-1080p`, using Proteus v4 (`prob-4`), source FPS, aspect-preserving 1080p output, and NVIDIA H.264 encoding. The client reads MP4 track dimensions before upload so the worker does not depend on launching Topaz's bundled FFprobe through a remote shell.
+Version 0.3 includes two bounded presets: `seedance-human-1080p` (default) and `seedance-human-1440p` (QHD/2K). Both use Proteus v4 (`prob-4`), preserve source FPS and aspect ratio, and use NVIDIA H.264 encoding. Both also use the versioned `proteus-auto-v1` tuning policy: Topaz estimates the six Proteus controls from a 20-frame window, the CLI adds no manual relative offsets, and 20% of the original detail is recovered. The resolved tuning policy is written into each job status for auditability.
+
+Raw Proteus parameter injection is intentionally not exposed. New tuning profiles require representative A/B tests and a package release so Agents cannot invent unverified filter values.
+
+The client reads MP4 track dimensions before upload so the worker does not depend on launching Topaz's bundled FFprobe through a remote shell.
 
 ## Configuration
 

@@ -6,10 +6,10 @@
     {
       "capability_id": "command.execute",
       "implementation": { "kind": "cli", "command": "topazlabscli" },
-      "features": ["local-process", "stdout-json", "exit-code"],
+      "features": ["local-process", "stdout-json", "exit-code", "resolution-selection", "automatic-parameter-tuning"],
       "status": "tested",
-      "tested_date": "2026-09-20",
-      "evidence": ["Codex invoked topazlabscli process --json through the local terminal and received a completed remote job contract."],
+      "tested_date": "2026-09-21",
+      "evidence": ["Codex ran version 0.3.0 against the Windows worker, processed a 9.024-second source with --resolution 2k, received an auditable proteus-auto-v1 status, downloaded the result, and verified 2560x1440 H.264 video with AAC audio."],
       "configuration": ["topazlabscli must resolve from PATH"],
       "permissions": ["local process execution", "network access to configured SSH target"],
       "normalization": "Invoke with --json and consume {ok,data,error}."

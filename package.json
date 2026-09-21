@@ -1,6 +1,6 @@
 {
   "name": "@petercjl/topazlabscli",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "Cross-Agent CLI and portable Skill for queued remote Topaz Video AI processing",
   "type": "module",
   "bin": {

@@ -1,4 +1,4 @@
 interface:
   display_name: "TopazLabs CLI"
-  short_description: "Queue remote Topaz Video AI enhancement jobs"
-  default_prompt: "Use topazlabscli to check the configured workstation and process a video safely."
+  short_description: "Queue adaptive 1080p or 2K Topaz enhancement jobs"
+  default_prompt: "Use topazlabscli to check the configured workstation and enhance a video at default 1080p or explicitly requested 2K with automatic Proteus tuning."

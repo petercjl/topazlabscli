@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { defaultOutputPath } from "../src/cli.mjs";
+import { defaultOutputPath, resolvePreset } from "../src/cli.mjs";
 import { probeMp4Dimensions } from "../src/media.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -24,6 +24,8 @@ test("version and capabilities are machine-readable", () => {
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.ok, true);
   assert.equal(payload.data.presets[0].model, "prob-4");
+  assert.deepEqual(payload.data.presets.map((item) => item.resolution), ["1080p", "2k"]);
+  assert.equal(payload.data.automatic_parameter_tuning.id, "proteus-auto-v1");
 });
 
 test("target configuration preserves endpoint order", () => {
@@ -62,9 +64,21 @@ test("process derives a predictable 1080p output path", () => {
   assert.equal(path.basename(result), "input-topaz-1080p.mp4");
 });
 
+test("2K aliases resolve to the QHD preset and output path", () => {
+  assert.equal(resolvePreset({ resolution: "2K" }).id, "seedance-human-1440p");
+  assert.equal(resolvePreset({ resolution: "qhd" }).short_edge, 1440);
+  const result = defaultOutputPath(path.join("C:", "Videos", "input.mp4"), { resolution: "1440p" });
+  assert.equal(path.basename(result), "input-topaz-2k.mp4");
+});
+
+test("unknown resolutions and conflicting preset options are rejected", () => {
+  assert.throws(() => resolvePreset({ resolution: "4k" }), { code: "RESOLUTION_UNSUPPORTED" });
+  assert.throws(() => resolvePreset({ preset: "seedance-human-1080p", resolution: "2k" }), { code: "PRESET_CONFLICT" });
+});
+
 test("processing uses an attached remote runner and worker version negotiation", () => {
   const source = fs.readFileSync(path.join(root, "src", "cli.mjs"), "utf8");
-  assert.match(source, /const WORKER_VERSION = "0\.2\.0"/);
+  assert.match(source, /const WORKER_VERSION = "0\.3\.0"/);
   assert.match(source, /await ensureWorker\(target, endpoint\)/);
   assert.match(source, /remoteAction\(target, endpoint, "Run", \{\}, \{ timeout: timeoutSeconds \}\)/);
   assert.doesNotMatch(source, /startPowerShellDetached\(target, endpoint/);

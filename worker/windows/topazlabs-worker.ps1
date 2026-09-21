@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$WorkerVersion = '0.2.0'
+$WorkerVersion = '0.3.0'
 $StateRoot = Join-Path $Root '.topazlabscli'
 $QueueRoot = Join-Path $StateRoot 'queue'
 $JobsRoot = Join-Path $StateRoot 'jobs'
@@ -111,22 +111,33 @@ function Invoke-Job($Job, $Config) {
   $jobDir = Job-Directory $id
   $inputPath = Join-Path (Join-Path $jobDir 'input') ([string]$Job.input_name)
   $outputDir = Join-Path $jobDir 'output'
-  $outputName = ([IO.Path]::GetFileNameWithoutExtension([string]$Job.input_name)) + '-topaz-1080p.mp4'
+  $preset = [string]$Job.preset
+  if ($preset -eq 'seedance-human-1080p') {
+    $shortEdge = 1080
+    $resolution = '1080p'
+  } elseif ($preset -eq 'seedance-human-1440p') {
+    $shortEdge = 1440
+    $resolution = '2k'
+  } else {
+    throw 'Unsupported preset.'
+  }
+  $outputName = ([IO.Path]::GetFileNameWithoutExtension([string]$Job.input_name)) + "-topaz-${resolution}.mp4"
   $outputPath = Join-Path $outputDir $outputName
   $logPath = Join-Path (Join-Path $jobDir 'logs') 'topaz-ffmpeg.log'
   if (-not (Test-Path -LiteralPath $inputPath)) { throw "Input file is missing: $inputPath" }
   if (-not (Test-Path -LiteralPath $Config.ffmpeg)) { throw "Topaz ffmpeg is missing: $($Config.ffmpeg)" }
 
-  Set-JobStatus $id @{ state = 'running'; started_at = (Get-Date).ToUniversalTime().ToString('o'); input_path = $inputPath; output_path = $outputPath; output_name = $outputName; preset = $Job.preset } | Out-Null
+  $tuning = @{ id = 'proteus-auto-v1'; method = 'topaz-proteus-estimate'; estimate_frames = 20; recover_original_detail = 0.2; relative_offsets = @{ preblur = 0; noise = 0; details = 0; halo = 0; blur = 0; compression = 0 } }
+  Set-JobStatus $id @{ state = 'running'; started_at = (Get-Date).ToUniversalTime().ToString('o'); input_path = $inputPath; output_path = $outputPath; output_name = $outputName; preset = $preset; resolution = $resolution; tuning = $tuning } | Out-Null
   $width = [int]$Job.source_width
   $height = [int]$Job.source_height
   if ($width -le 0 -or $height -le 0) { throw 'Source dimensions are missing from the queued job.' }
   if ($width -ge $height) {
-    $targetHeight = 1080
-    $targetWidth = [int](2 * [Math]::Round((1080.0 * $width / $height) / 2.0))
+    $targetHeight = $shortEdge
+    $targetWidth = [int](2 * [Math]::Round(([double]$shortEdge * $width / $height) / 2.0))
   } else {
-    $targetWidth = 1080
-    $targetHeight = [int](2 * [Math]::Round((1080.0 * $height / $width) / 2.0))
+    $targetWidth = $shortEdge
+    $targetHeight = [int](2 * [Math]::Round(([double]$shortEdge * $height / $width) / 2.0))
   }
   $env:TVAI_MODEL_DIR = [string]$Config.model_dir
   $env:TVAI_MODEL_DATA_DIR = [string]$Config.model_data_dir
@@ -145,7 +156,7 @@ function Invoke-Job($Job, $Config) {
   $ErrorActionPreference = $oldPreference
   if ($exit -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) { throw "Topaz ffmpeg failed with exit code $exit. See $logPath" }
   $size = (Get-Item -LiteralPath $outputPath).Length
-  Set-JobStatus $id @{ state = 'completed'; completed_at = (Get-Date).ToUniversalTime().ToString('o'); output_path = $outputPath; output_name = $outputName; output_bytes = $size; width = $targetWidth; height = $targetHeight; model = 'prob-4' } | Out-Null
+  Set-JobStatus $id @{ state = 'completed'; completed_at = (Get-Date).ToUniversalTime().ToString('o'); output_path = $outputPath; output_name = $outputName; output_bytes = $size; width = $targetWidth; height = $targetHeight; model = 'prob-4'; preset = $preset; resolution = $resolution; tuning = $tuning } | Out-Null
 }
 
 Ensure-Directories
@@ -196,11 +207,12 @@ switch ($Action) {
     $id = [string]$payload.id
     Assert-SafeName $id 'job id'
     Assert-SafeName ([string]$payload.input_name) 'input name'
-    if ($payload.preset -ne 'seedance-human-1080p') { throw 'Unsupported preset.' }
+    if (@('seedance-human-1080p', 'seedance-human-1440p') -notcontains [string]$payload.preset) { throw 'Unsupported preset.' }
     $queuePath = Join-Path $QueueRoot "$id.json"
     $payload | ConvertTo-Json | Set-Content -LiteralPath "$queuePath.tmp" -Encoding UTF8
     Move-Item -Force -LiteralPath "$queuePath.tmp" -Destination $queuePath
-    Set-JobStatus $id @{ state = 'queued'; queued_at = (Get-Date).ToUniversalTime().ToString('o'); preset = $payload.preset } | Out-Null
+    $resolution = if ($payload.preset -eq 'seedance-human-1440p') { '2k' } else { '1080p' }
+    Set-JobStatus $id @{ state = 'queued'; queued_at = (Get-Date).ToUniversalTime().ToString('o'); preset = $payload.preset; resolution = $resolution; tuning = @{ id = 'proteus-auto-v1'; method = 'topaz-proteus-estimate'; estimate_frames = 20 } } | Out-Null
     Write-Json @{ ok = $true; id = $id; state = 'queued' }
   }
   'Run' {

@@ -13,8 +13,39 @@ import { installLatestPackage, maybeAutoUpdate, queryLatestVersion, updateRegist
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
-const PRESET = "seedance-human-1080p";
-const WORKER_VERSION = "0.2.0";
+const DEFAULT_PRESET = "seedance-human-1080p";
+const WORKER_VERSION = "0.3.0";
+const PRESETS = {
+  "seedance-human-1080p": {
+    id: "seedance-human-1080p",
+    resolution: "1080p",
+    short_edge: 1080,
+    output: "aspect-preserving 1080p",
+    model: "prob-4",
+    tuning: "proteus-auto-v1",
+    fps: "source",
+    concurrency: 1
+  },
+  "seedance-human-1440p": {
+    id: "seedance-human-1440p",
+    resolution: "2k",
+    short_edge: 1440,
+    output: "aspect-preserving QHD/2K (1440p short edge)",
+    model: "prob-4",
+    tuning: "proteus-auto-v1",
+    fps: "source",
+    concurrency: 1
+  }
+};
+const RESOLUTION_PRESETS = {
+  "1080": "seedance-human-1080p",
+  "1080p": "seedance-human-1080p",
+  "fhd": "seedance-human-1080p",
+  "1440": "seedance-human-1440p",
+  "1440p": "seedance-human-1440p",
+  "2k": "seedance-human-1440p",
+  "qhd": "seedance-human-1440p"
+};
 
 const CAPABILITIES = {
   schema_version: 1,
@@ -22,8 +53,17 @@ const CAPABILITIES = {
   version: pkg.version,
   commands: ["version", "capabilities", "doctor", "settings", "target", "connection", "worker", "model", "job", "process", "skill", "update"],
   automatic_updates: { enabled_by_default: true, registry_check_hours: 6, registry_fallback: true, refreshes_installed_skills: true },
-  presets: [{ id: PRESET, model: "prob-4", output: "aspect-preserving 1080p", fps: "source", concurrency: 1 }],
-  agents: { codex: "tested", sealseek_windows: "tested" },
+  default_preset: DEFAULT_PRESET,
+  presets: Object.values(PRESETS),
+  automatic_parameter_tuning: {
+    id: "proteus-auto-v1",
+    model: "prob-4",
+    method: "Topaz Proteus automatic estimation",
+    estimate_frames: 20,
+    relative_offsets: { preblur: 0, noise: 0, details: 0, halo: 0, blur: 0, compression: 0 },
+    recover_original_detail: 0.2
+  },
+  agents: { codex: "tested", sealseek_windows: "implemented" },
   worker_os: ["windows"],
   transport: ["ssh", "sftp"]
 };
@@ -68,10 +108,10 @@ function help() {
     `  connection check [--target <name>]\n` +
     `  worker install|status [--target <name>]\n` +
     `  model status [--target <name>]\n` +
-    `  job submit <video> [--target <name>] [--preset ${PRESET}]\n` +
+    `  job submit <video> [--target <name>] [--resolution 1080p|2k] [--preset <id>]\n` +
     `  job list [--target <name>]\n` +
     `  job status|wait|download|cancel <job-id> [--target <name>] [--output <path>]\n` +
-    `  process <video> [--output <path>] [--target <name>]\n` +
+    `  process <video> [--resolution 1080p|2k] [--output <path>] [--target <name>]\n` +
     `  skill source|status|install|update [--agent codex|sealseek|all] [--copy]\n` +
     `  update\n\nUse --json for machine-readable output.`;
 }
@@ -131,10 +171,23 @@ async function ensureWorker(target, endpoint) {
   return status;
 }
 
-async function submitJob(inputPath, requestedTarget, preset = PRESET) {
+export function resolvePreset({ preset, resolution } = {}) {
+  let resolved = preset || null;
+  if (resolution) {
+    const fromResolution = RESOLUTION_PRESETS[String(resolution).toLowerCase()];
+    if (!fromResolution) throw new CliError("RESOLUTION_UNSUPPORTED", `Unsupported resolution: ${resolution}. Use 1080p or 2k.`);
+    if (resolved && resolved !== fromResolution) throw new CliError("PRESET_CONFLICT", `Preset ${resolved} does not match resolution ${resolution}.`);
+    resolved = fromResolution;
+  }
+  resolved ||= DEFAULT_PRESET;
+  if (!PRESETS[resolved]) throw new CliError("PRESET_UNSUPPORTED", `Unsupported preset: ${resolved}`);
+  return PRESETS[resolved];
+}
+
+async function submitJob(inputPath, requestedTarget, presetOptions = {}) {
   const input = path.resolve(inputPath);
   if (!fs.existsSync(input) || !fs.statSync(input).isFile()) throw new CliError("INPUT_NOT_FOUND", `Video not found: ${input}`);
-  if (preset !== PRESET) throw new CliError("PRESET_UNSUPPORTED", `Unsupported preset: ${preset}`);
+  const preset = resolvePreset(presetOptions);
   let source;
   try { source = probeMp4Dimensions(input); }
   catch (error) { throw new CliError("INPUT_METADATA_UNSUPPORTED", `Could not read MP4 video dimensions: ${error.message}`); }
@@ -144,8 +197,8 @@ async function submitJob(inputPath, requestedTarget, preset = PRESET) {
   const worker = await ensureWorker(target, endpoint);
   const prepared = await remoteAction(target, endpoint, "Prepare", { id, input_name: safeName });
   await sftpPut(target, endpoint, input, prepared.input_path);
-  const job = await remoteAction(target, endpoint, "Enqueue", { id, input_name: safeName, preset, source_width: source.width, source_height: source.height });
-  return { ...job, target: target.name, endpoint: endpoint.name, worker_version: worker.worker_version, connection_attempts: attempts };
+  const job = await remoteAction(target, endpoint, "Enqueue", { id, input_name: safeName, preset: preset.id, source_width: source.width, source_height: source.height });
+  return { ...job, preset: preset.id, resolution: preset.resolution, tuning: preset.tuning, target: target.name, endpoint: endpoint.name, worker_version: worker.worker_version, connection_attempts: attempts };
 }
 
 async function runQueue(requestedTarget, timeoutSeconds = 86400) {
@@ -174,10 +227,12 @@ async function downloadJob(id, requestedTarget, outputPath) {
   return { id, target: target.name, endpoint: endpoint.name, output: destination };
 }
 
-export function defaultOutputPath(inputPath) {
+export function defaultOutputPath(inputPath, presetOptions = {}) {
   const resolved = path.resolve(inputPath);
   const extension = path.extname(resolved) || ".mp4";
-  return path.join(path.dirname(resolved), `${path.basename(resolved, path.extname(resolved))}-topaz-1080p${extension}`);
+  const preset = resolvePreset(presetOptions);
+  const label = preset.resolution === "2k" ? "2k" : "1080p";
+  return path.join(path.dirname(resolved), `${path.basename(resolved, path.extname(resolved))}-topaz-${label}${extension}`);
 }
 
 async function doctor(requestedTarget, updateInfo = null) {
@@ -315,7 +370,7 @@ export async function main(rawArgs) {
   if (command === "job") {
     const action = args.shift();
     const requested = option(args, "--target");
-    if (action === "submit") return output(await submitJob(requireValue(args.shift(), "INPUT_REQUIRED", "job submit requires a video."), requested, option(args, "--preset") || PRESET), json);
+    if (action === "submit") return output(await submitJob(requireValue(args.shift(), "INPUT_REQUIRED", "job submit requires a video."), requested, { preset: option(args, "--preset"), resolution: option(args, "--resolution") }), json);
     if (action === "list") {
       const { target, endpoint } = await getConnectedTarget(requested);
       return output(await remoteAction(target, endpoint, "ListJobs"), json);
@@ -341,10 +396,12 @@ export async function main(rawArgs) {
 
   if (command === "process") {
     const input = requireValue(args.shift(), "INPUT_REQUIRED", "process requires a video.");
-    const destination = option(args, "--output") || defaultOutputPath(input);
+    const presetOptions = { preset: option(args, "--preset"), resolution: option(args, "--resolution") };
+    const selectedPreset = resolvePreset(presetOptions);
+    const destination = option(args, "--output") || defaultOutputPath(input, { preset: selectedPreset.id });
     const requested = option(args, "--target");
     const timeout = Number(option(args, "--timeout") || 86400);
-    const submitted = await submitJob(input, requested, option(args, "--preset") || PRESET);
+    const submitted = await submitJob(input, requested, { preset: selectedPreset.id });
     const runner = await runQueue(requested, timeout);
     const finished = await waitJob(submitted.id, requested, Number(option(args, "--interval") || 10), timeout);
     if (finished.state !== "completed") throw new CliError("JOB_FAILED", `Job ${submitted.id} ended as ${finished.state}.`, finished);
