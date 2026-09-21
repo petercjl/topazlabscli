@@ -6,6 +6,8 @@ import { run, runInherited } from "./process.mjs";
 import { skillInstall, skillStatus } from "./skill.mjs";
 
 const DEFAULT_INTERVAL_HOURS = 6;
+const DEFAULT_MIRROR_REGISTRY = "https://registry.npmmirror.com/";
+const UPDATE_TIMEOUT_MS = 8000;
 const UPDATE_GUARD = "TOPAZLABSCLI_AUTO_UPDATE_GUARD";
 
 function numericParts(version) {
@@ -41,6 +43,87 @@ function automaticUpdateEnabled(config, env) {
   return config.settings?.auto_update !== false;
 }
 
+function normalizeRegistry(value) {
+  const text = String(value || "").trim();
+  if (!/^https?:\/\//i.test(text)) return null;
+  return text.endsWith("/") ? text : `${text}/`;
+}
+
+function uniqueRegistries(values) {
+  return [...new Set(values.map(normalizeRegistry).filter(Boolean))];
+}
+
+export async function resolveUpdateRegistries(config, dependencies = {}) {
+  const env = dependencies.env || process.env;
+  const execute = dependencies.run || run;
+  const configured = config.settings?.update_registry;
+  const overrides = String(env.TOPAZLABSCLI_UPDATE_REGISTRY || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const preferred = configured && configured !== "auto" ? [configured] : [];
+  let npmRegistry = null;
+  try {
+    const result = await execute("npm", ["config", "get", "registry"], {
+      env,
+      timeoutMs: dependencies.timeoutMs || UPDATE_TIMEOUT_MS
+    });
+    if (result.code === 0) npmRegistry = result.stdout.trim();
+  } catch {}
+  return uniqueRegistries([...overrides, ...preferred, npmRegistry, DEFAULT_MIRROR_REGISTRY]);
+}
+
+export async function queryLatestVersion(pkg, config, dependencies = {}) {
+  const env = dependencies.env || process.env;
+  const execute = dependencies.run || run;
+  const registries = dependencies.registries || await resolveUpdateRegistries(config, dependencies);
+  const attempts = [];
+  for (const registry of registries) {
+    let result;
+    try {
+      result = await execute("npm", ["view", pkg.name, "version", "--json", "--registry", registry], {
+        env: {
+          ...env,
+          npm_config_fetch_timeout: env.npm_config_fetch_timeout || "5000",
+          npm_config_fetch_retries: "0"
+        },
+        timeoutMs: dependencies.timeoutMs || UPDATE_TIMEOUT_MS
+      });
+    } catch (error) {
+      attempts.push({ registry, ok: false, detail: error.message });
+      continue;
+    }
+    if (result.code !== 0) {
+      attempts.push({
+        registry,
+        ok: false,
+        detail: result.timedOut ? "timed out" : (result.stderr.trim() || "registry query failed")
+      });
+      continue;
+    }
+    let latest;
+    try { latest = JSON.parse(result.stdout.trim()); }
+    catch { latest = result.stdout.trim().replace(/^"|"$/g, ""); }
+    attempts.push({ registry, ok: true, latest });
+    return { ok: true, latest, registry, attempts };
+  }
+  return { ok: false, attempts };
+}
+
+function registryFailureMessage(attempts) {
+  if (!attempts.length) return "No valid npm update registry is configured.";
+  return `Unable to check npm for updates: ${attempts.map((item) => `${item.registry} (${item.detail})`).join("; ")}`;
+}
+
+export async function installLatestPackage(pkg, registry, dependencies = {}) {
+  const env = dependencies.env || process.env;
+  const execute = dependencies.run || run;
+  return execute("npm", ["install", "--global", `${pkg.name}@latest`, "--registry", registry], {
+    env,
+    timeoutMs: dependencies.installTimeoutMs
+  });
+}
+
 export async function maybeAutoUpdate(rawArgs, pkg, dependencies = {}) {
   const env = dependencies.env || process.env;
   if (env[UPDATE_GUARD] === "1") return { checked: false, reason: "guard" };
@@ -54,39 +137,27 @@ export async function maybeAutoUpdate(rawArgs, pkg, dependencies = {}) {
   const intervalMs = Math.max(0, intervalHours) * 60 * 60 * 1000;
   const state = readState(stateFile);
   if (intervalMs > 0 && Number.isFinite(state.last_checked_at) && now - state.last_checked_at < intervalMs) {
-    return { checked: false, reason: "fresh", latest: state.latest || null };
+    return { checked: false, reason: "fresh", latest: state.latest || null, registry: state.registry || null };
   }
 
-  const execute = dependencies.run || run;
-  let query;
-  try {
-    query = await execute("npm", ["view", pkg.name, "version", "--json"], {
-      env: { ...env, npm_config_fetch_timeout: env.npm_config_fetch_timeout || "5000", npm_config_fetch_retries: "0" }
-    });
-  } catch (error) {
-    return { checked: true, warning: `Unable to check npm for updates: ${error.message}` };
-  }
-  if (query.code !== 0) {
-    return { checked: true, warning: query.stderr.trim() || "Unable to check npm for updates." };
-  }
+  const query = await queryLatestVersion(pkg, config, dependencies);
+  if (!query.ok) return { checked: true, warning: registryFailureMessage(query.attempts), attempts: query.attempts };
 
-  let latest;
-  try { latest = JSON.parse(query.stdout.trim()); }
-  catch { latest = query.stdout.trim().replace(/^"|"$/g, ""); }
-  writeState(stateFile, { last_checked_at: now, latest, current: pkg.version });
-  if (!isNewerVersion(latest, pkg.version)) return { checked: true, updated: false, latest };
+  const { latest, registry } = query;
+  writeState(stateFile, { last_checked_at: now, latest, current: pkg.version, registry });
+  if (!isNewerVersion(latest, pkg.version)) return { checked: true, updated: false, latest, registry, attempts: query.attempts };
 
   const getSkillStatus = dependencies.skillStatus || skillStatus;
   const installSkill = dependencies.skillInstall || skillInstall;
   const installedSkills = getSkillStatus("all").filter((item) => item.installed);
   let install;
   try {
-    install = await execute("npm", ["install", "--global", `${pkg.name}@latest`], { env });
+    install = await installLatestPackage(pkg, registry, dependencies);
   } catch (error) {
-    return { checked: true, warning: `Automatic npm update failed: ${error.message}`, latest };
+    return { checked: true, warning: `Automatic npm update failed: ${error.message}`, latest, registry };
   }
   if (install.code !== 0) {
-    return { checked: true, warning: install.stderr.trim() || "Automatic npm update failed.", latest };
+    return { checked: true, warning: install.stderr.trim() || "Automatic npm update failed.", latest, registry };
   }
   const warnings = [];
   for (const item of installedSkills) {
@@ -99,9 +170,13 @@ export async function maybeAutoUpdate(rawArgs, pkg, dependencies = {}) {
     const child = await reexecute(process.execPath, [binScript, ...rawArgs], {
       env: { ...env, [UPDATE_GUARD]: "1" }
     });
-    return { checked: true, updated: true, latest, reexecuted: true, exitCode: child.code ?? 1, warnings };
+    return { checked: true, updated: true, latest, registry, reexecuted: true, exitCode: child.code ?? 1, warnings };
   } catch (error) {
     warnings.push(`Updated package could not restart the command: ${error.message}`);
-    return { checked: true, updated: true, latest, warning: warnings.join(" ") };
+    return { checked: true, updated: true, latest, registry, warning: warnings.join(" ") };
   }
+}
+
+export function updateRegistryWarning(attempts) {
+  return registryFailureMessage(attempts);
 }

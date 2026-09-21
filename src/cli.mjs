@@ -8,7 +8,7 @@ import { CliError, requireValue } from "./errors.mjs";
 import { run } from "./process.mjs";
 import { psLiteral, runPowerShell, selectEndpoint, sftpGet, sftpPut, startPowerShellDetached } from "./ssh.mjs";
 import { skillInstall, skillSource, skillStatus } from "./skill.mjs";
-import { maybeAutoUpdate } from "./update.mjs";
+import { installLatestPackage, maybeAutoUpdate, queryLatestVersion, updateRegistryWarning } from "./update.mjs";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
@@ -19,7 +19,7 @@ const CAPABILITIES = {
   package: pkg.name,
   version: pkg.version,
   commands: ["version", "capabilities", "doctor", "settings", "target", "connection", "worker", "model", "job", "process", "skill", "update"],
-  automatic_updates: { enabled_by_default: true, registry_check_hours: 6, refreshes_installed_skills: true },
+  automatic_updates: { enabled_by_default: true, registry_check_hours: 6, registry_fallback: true, refreshes_installed_skills: true },
   presets: [{ id: PRESET, model: "prob-4", output: "aspect-preserving 1080p", fps: "source", concurrency: 1 }],
   agents: { codex: "tested", sealseek_windows: "tested" },
   worker_os: ["windows"],
@@ -60,7 +60,7 @@ function help() {
   return `topazlabscli ${pkg.version}\n\n` +
     `Commands:\n` +
     `  version | capabilities | doctor\n` +
-    `  settings show | set auto-update <on|off> | set update-check-hours <hours>\n` +
+    `  settings show | set auto-update <on|off> | set update-check-hours <hours> | set update-registry <auto|url>\n` +
     `  target add <name> --endpoint <label=host>... --user <user> [--identity <path>] [--workspace <windows-path>] [--default]\n` +
     `  target list\n` +
     `  connection check [--target <name>]\n` +
@@ -152,7 +152,7 @@ export function defaultOutputPath(inputPath) {
   return path.join(path.dirname(resolved), `${path.basename(resolved, path.extname(resolved))}-topaz-1080p${extension}`);
 }
 
-async function doctor(requestedTarget) {
+async function doctor(requestedTarget, updateInfo = null) {
   const checks = [];
   for (const command of ["ssh", "sftp", "node", "npm"]) {
     const args = command === "node" || command === "npm" ? ["--version"] : command === "sftp" ? ["-h"] : ["-V"];
@@ -169,6 +169,16 @@ async function doctor(requestedTarget) {
     });
   }
   checks.push({ id: "config", ok: fs.existsSync(configPath()), detail: configPath() });
+  if (updateInfo) {
+    checks.push({
+      id: "updates.registry",
+      ok: Boolean(updateInfo.registry),
+      required: false,
+      detail: updateInfo.registry
+        ? { registry: updateInfo.registry, latest: updateInfo.latest || null, checked: updateInfo.checked }
+        : { warning: updateInfo.warning || "Update registry was not checked.", attempts: updateInfo.attempts || [] }
+    });
+  }
   if (requestedTarget || fs.existsSync(configPath())) {
     try {
       const { target, endpoint } = await getConnectedTarget(requestedTarget);
@@ -183,7 +193,7 @@ async function doctor(requestedTarget) {
       checks.push({ id: "connection", ok: false, detail: error.details || error.message });
     }
   }
-  return { ok: checks.every((item) => item.ok), checks };
+  return { ok: checks.filter((item) => item.required !== false).every((item) => item.ok), checks };
 }
 
 export async function main(rawArgs) {
@@ -194,11 +204,12 @@ export async function main(rawArgs) {
   if (command === "version" || command === "--version" || command === "-V") return output(pkg.version, json);
   if (command === "capabilities") return output(CAPABILITIES, json);
 
+  let updateInfo = null;
   if (!["update", "settings"].includes(command)) {
-    const update = await maybeAutoUpdate(rawArgs, pkg);
-    if (update.warning) process.stderr.write(`[AUTO_UPDATE_WARNING] ${update.warning}\n`);
-    if (update.reexecuted) {
-      process.exitCode = update.exitCode;
+    updateInfo = await maybeAutoUpdate(rawArgs, pkg);
+    if (updateInfo.warning) process.stderr.write(`[AUTO_UPDATE_WARNING] ${updateInfo.warning}\n`);
+    if (updateInfo.reexecuted) {
+      process.exitCode = updateInfo.exitCode;
       return;
     }
   }
@@ -217,6 +228,9 @@ export async function main(rawArgs) {
         const hours = Number(value);
         if (!Number.isFinite(hours) || hours < 0) throw new CliError("SETTING_INVALID", "update-check-hours must be zero or a positive number.");
         config.settings.update_check_hours = hours;
+      } else if (name === "update-registry") {
+        if (value !== "auto" && !/^https?:\/\//i.test(value)) throw new CliError("SETTING_INVALID", "update-registry must be auto or an http(s) URL.");
+        config.settings.update_registry = value;
       } else throw new CliError("SETTING_UNKNOWN", `Unknown setting: ${name}`);
       const saved = saveConfig(config);
       return output({ path: saved, settings: config.settings }, json);
@@ -224,7 +238,7 @@ export async function main(rawArgs) {
     throw new CliError("COMMAND_UNKNOWN", `Unknown settings action: ${action}`);
   }
 
-  if (command === "doctor") return output(await doctor(option(args, "--target")), json);
+  if (command === "doctor") return output(await doctor(option(args, "--target"), updateInfo), json);
 
   if (command === "target") {
     const action = args.shift();
@@ -319,14 +333,17 @@ export async function main(rawArgs) {
   }
 
   if (command === "update") {
+    const config = loadConfig();
+    const query = await queryLatestVersion(pkg, config);
+    if (!query.ok) throw new CliError("UPDATE_FAILED", updateRegistryWarning(query.attempts), { attempts: query.attempts });
     const previousSkills = skillStatus("all");
-    const result = await run("npm", ["install", "-g", `${pkg.name}@latest`]);
+    const result = await installLatestPackage(pkg, query.registry);
     if (result.code !== 0) throw new CliError("UPDATE_FAILED", result.stderr.trim() || "npm update failed.");
     const skills = [];
     for (const existing of previousSkills.filter((item) => item.installed)) {
       skills.push(...skillInstall(existing.agent, existing.mode || "link", true));
     }
-    return output({ package: pkg.name, updated: true, skills, detail: result.stdout.trim() }, json);
+    return output({ package: pkg.name, updated: true, registry: query.registry, latest: query.latest, skills, detail: result.stdout.trim() }, json);
   }
   throw new CliError("COMMAND_UNKNOWN", `Unknown command: ${command}`);
 }

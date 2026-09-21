@@ -8,7 +8,7 @@ export function emptyConfig() {
     schema_version: 1,
     default_target: null,
     targets: {},
-    settings: { auto_update: true, update_check_hours: 6 }
+    settings: { auto_update: true, update_check_hours: 6, update_registry: "auto" }
   };
 }
 
@@ -29,7 +29,10 @@ export function loadConfig({ required = false } = {}) {
         auto_update: parsed.settings?.auto_update !== false,
         update_check_hours: Number.isFinite(parsed.settings?.update_check_hours)
           ? parsed.settings.update_check_hours
-          : 6
+          : 6,
+        update_registry: typeof parsed.settings?.update_registry === "string"
+          ? parsed.settings.update_registry
+          : "auto"
       }
     };
   } catch (error) {

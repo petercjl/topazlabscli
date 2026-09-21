@@ -15,7 +15,7 @@ npm install --global @petercjl/topazlabscli
 topazlabscli skill install --agent all
 ```
 
-The CLI checks npm for a newer stable release before operational commands, at most once every six hours. When an update is available it upgrades itself, refreshes installed Agent Skills, and then resumes the original command. It discovers npm through the running Node installation, preserves SealSeek's managed global prefix/cache, and discovers Windows OpenSSH through the standard system location, so it also works in Agent runtimes with a restricted `PATH`. A temporary npm outage does not block video processing. `topazlabscli update` forces an immediate manual update.
+The CLI checks npm for a newer stable release before operational commands, at most once every six hours. It first uses the registry already configured for npm and automatically tries `https://registry.npmmirror.com/` if that registry is unavailable. The successful registry is also used for installation, without changing the user's `.npmrc`. When an update is available the CLI upgrades itself, refreshes installed Agent Skills, and then resumes the original command. It discovers npm through the running Node installation, preserves SealSeek's managed global prefix/cache, and discovers Windows OpenSSH through the standard system location, so it also works in Agent runtimes with a restricted `PATH`. A temporary registry outage does not block video processing. `topazlabscli update` forces an immediate manual update.
 
 On Windows, SealSeek Skills are installed into `%USERPROFILE%\.sealseek\workspace\skills` when that workspace is present. The CLI automatically uses a managed copy because SealSeek rejects junctions that resolve outside the workspace Skill root; subsequent CLI updates refresh the copy from the npm package. The copy includes a local runtime manifest so the Agent can invoke the canonical package even when its PATH is restricted. `SEALSEEK_SKILLS_HOME` remains available as an explicit override.
 
@@ -83,5 +83,7 @@ Configuration is stored outside the package:
 - Windows: `%APPDATA%\topazlabscli\config.json`
 - macOS/Linux: `${XDG_CONFIG_HOME:-~/.config}/topazlabscli/config.json`
 - Override for testing or automation: `TOPAZLABSCLI_CONFIG`
+
+Update registry selection is CLI-local. `settings set update-registry <url>` sets a preferred registry, and `settings set update-registry auto` restores automatic selection. `TOPAZLABSCLI_UPDATE_REGISTRY` can provide one or more comma-separated preferred registries for managed environments.
 
 Do not publish configuration files, keys, internal addresses, media, Topaz model files, or authentication data.

@@ -50,6 +50,10 @@ test("automatic update settings are persisted", () => {
   assert.equal(changed.status, 0, changed.stderr);
   const shown = cli(["settings", "show", "--json"], { TOPAZLABSCLI_CONFIG: config });
   assert.equal(JSON.parse(shown.stdout).data.auto_update, false);
+  assert.equal(JSON.parse(shown.stdout).data.update_registry, "auto");
+  const registry = cli(["settings", "set", "update-registry", "https://registry.example.test", "--json"], { TOPAZLABSCLI_CONFIG: config });
+  assert.equal(registry.status, 0, registry.stderr);
+  assert.equal(JSON.parse(registry.stdout).data.settings.update_registry, "https://registry.example.test");
 });
 
 test("process derives a predictable 1080p output path", () => {

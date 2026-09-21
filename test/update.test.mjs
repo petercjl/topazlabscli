@@ -21,6 +21,7 @@ test("automatic update installs latest, refreshes skills, and reexecutes once", 
     loadConfig: () => ({ settings: { auto_update: true, update_check_hours: 6 } }),
     run: async (command, args) => {
       calls.push([command, ...args]);
+      if (args[0] === "config") return { code: 0, stdout: "https://registry.npmjs.org/\n", stderr: "" };
       if (args[0] === "view") return { code: 0, stdout: '"0.2.0"\n', stderr: "" };
       return { code: 0, stdout: "updated", stderr: "" };
     },
@@ -29,9 +30,33 @@ test("automatic update installs latest, refreshes skills, and reexecutes once", 
     runInherited: async () => ({ code: 0 })
   });
   assert.equal(result.updated, true);
-  assert.deepEqual(calls[1], ["npm", "install", "--global", "@example/topaz@latest"]);
+  assert.equal(result.registry, "https://registry.npmjs.org/");
+  assert.deepEqual(calls[2], ["npm", "install", "--global", "@example/topaz@latest", "--registry", "https://registry.npmjs.org/"]);
   assert.deepEqual(refreshed, [["sealseek", "copy", true]]);
   assert.equal(result.exitCode, 0);
+});
+
+test("automatic update falls back to mirror and installs from the same registry", async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "topazlabscli-update-mirror-"));
+  const calls = [];
+  const result = await maybeAutoUpdate(["doctor"], { name: "@example/topaz", version: "0.1.1" }, {
+    env: {},
+    stateFile: path.join(temporary, "state.json"),
+    loadConfig: () => ({ settings: { auto_update: true, update_check_hours: 6, update_registry: "auto" } }),
+    run: async (command, args) => {
+      calls.push([command, ...args]);
+      if (args[0] === "config") return { code: 0, stdout: "https://registry.npmjs.org/\n", stderr: "" };
+      if (args[0] === "view" && args.at(-1) === "https://registry.npmjs.org/") {
+        return { code: 1, stdout: "", stderr: "network timeout", timedOut: true };
+      }
+      if (args[0] === "view") return { code: 0, stdout: '"0.2.0"\n', stderr: "" };
+      return { code: 0, stdout: "updated", stderr: "" };
+    },
+    skillStatus: () => [],
+    runInherited: async () => ({ code: 0 })
+  });
+  assert.equal(result.registry, "https://registry.npmmirror.com/");
+  assert.deepEqual(calls.at(-1), ["npm", "install", "--global", "@example/topaz@latest", "--registry", "https://registry.npmmirror.com/"]);
 });
 
 test("registry failure warns without blocking the command", async () => {
@@ -42,7 +67,8 @@ test("registry failure warns without blocking the command", async () => {
     loadConfig: () => ({ settings: { auto_update: true, update_check_hours: 6 } }),
     run: async () => ({ code: 1, stdout: "", stderr: "offline" })
   });
-  assert.equal(result.warning, "offline");
+  assert.match(result.warning, /Unable to check npm for updates/);
+  assert.match(result.warning, /registry\.npmmirror\.com/);
   assert.equal(result.updated, undefined);
 });
 
@@ -56,4 +82,20 @@ test("missing npm warns without blocking the command", async () => {
   });
   assert.match(result.warning, /spawn npm ENOENT/);
   assert.equal(result.updated, undefined);
+});
+
+test("registry selection never writes npm configuration", async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "topazlabscli-update-readonly-"));
+  const calls = [];
+  await maybeAutoUpdate(["doctor"], { name: "@example/topaz", version: "0.2.2" }, {
+    env: {},
+    stateFile: path.join(temporary, "state.json"),
+    loadConfig: () => ({ settings: { auto_update: true, update_check_hours: 6, update_registry: "auto" } }),
+    run: async (command, args) => {
+      calls.push([command, ...args]);
+      if (args[0] === "config") return { code: 0, stdout: "https://registry.npmjs.org/\n", stderr: "" };
+      return { code: 0, stdout: '"0.2.2"\n', stderr: "" };
+    }
+  });
+  assert.equal(calls.some((call) => call[1] === "config" && call[2] === "set"), false);
 });
