@@ -32,7 +32,7 @@ test("automatic update installs latest, refreshes skills, and reexecutes once", 
   });
   assert.equal(result.updated, true);
   assert.equal(result.registry, "https://registry.npmjs.org/");
-  assert.deepEqual(calls[2], ["npm", "pack", "@example/topaz@latest", "--json", "--pack-destination", calls[2][5], "--registry", "https://registry.npmjs.org/"]);
+  assert.deepEqual(calls[2], ["npm", "pack", "@example/topaz@0.2.0", "--json", "--pack-destination", calls[2][5], "--registry", "https://registry.npmjs.org/"]);
   assert.deepEqual(calls[3].slice(0, 3), ["npm", "install", "--global"]);
   assert.match(calls[3][3], /example-topaz-0\.2\.0\.tgz$/);
   assert.deepEqual(refreshed, [["sealseek", "copy", true]]);

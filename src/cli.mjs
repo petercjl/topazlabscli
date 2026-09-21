@@ -337,7 +337,7 @@ export async function main(rawArgs) {
     const query = await queryLatestVersion(pkg, config);
     if (!query.ok) throw new CliError("UPDATE_FAILED", updateRegistryWarning(query.attempts), { attempts: query.attempts });
     const previousSkills = skillStatus("all");
-    const result = await installLatestPackage(pkg, query.registry);
+    const result = await installLatestPackage(pkg, query.latest, query.registry);
     if (result.code !== 0) throw new CliError("UPDATE_FAILED", result.stderr.trim() || "npm update failed.");
     const skills = [];
     for (const existing of previousSkills.filter((item) => item.installed)) {

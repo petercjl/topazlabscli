@@ -116,12 +116,12 @@ function registryFailureMessage(attempts) {
   return `Unable to check npm for updates: ${attempts.map((item) => `${item.registry} (${item.detail})`).join("; ")}`;
 }
 
-export async function installLatestPackage(pkg, registry, dependencies = {}) {
+export async function installLatestPackage(pkg, latest, registry, dependencies = {}) {
   const env = dependencies.env || process.env;
   const execute = dependencies.run || run;
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "topazlabscli-update-"));
   try {
-    const packed = await execute("npm", ["pack", `${pkg.name}@latest`, "--json", "--pack-destination", temporary, "--registry", registry], {
+    const packed = await execute("npm", ["pack", `${pkg.name}@${latest}`, "--json", "--pack-destination", temporary, "--registry", registry], {
       env,
       timeoutMs: dependencies.timeoutMs || UPDATE_TIMEOUT_MS
     });
@@ -169,7 +169,7 @@ export async function maybeAutoUpdate(rawArgs, pkg, dependencies = {}) {
   const installedSkills = getSkillStatus("all").filter((item) => item.installed);
   let install;
   try {
-    install = await installLatestPackage(pkg, registry, dependencies);
+    install = await installLatestPackage(pkg, latest, registry, dependencies);
   } catch (error) {
     return { checked: true, warning: `Automatic npm update failed: ${error.message}`, latest, registry };
   }
