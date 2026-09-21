@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { loadConfig } from "./config.mjs";
 import { binScript, updateStatePath } from "./paths.mjs";
@@ -118,10 +119,26 @@ function registryFailureMessage(attempts) {
 export async function installLatestPackage(pkg, registry, dependencies = {}) {
   const env = dependencies.env || process.env;
   const execute = dependencies.run || run;
-  return execute("npm", ["install", "--global", `${pkg.name}@latest`, "--registry", registry], {
-    env,
-    timeoutMs: dependencies.installTimeoutMs
-  });
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "topazlabscli-update-"));
+  try {
+    const packed = await execute("npm", ["pack", `${pkg.name}@latest`, "--json", "--pack-destination", temporary, "--registry", registry], {
+      env,
+      timeoutMs: dependencies.timeoutMs || UPDATE_TIMEOUT_MS
+    });
+    if (packed.code !== 0) return packed;
+    let filename;
+    try { filename = JSON.parse(packed.stdout.trim())[0]?.filename; }
+    catch {}
+    if (!filename) {
+      return { ...packed, code: 1, stderr: packed.stderr || "npm pack did not return a package filename." };
+    }
+    return await execute("npm", ["install", "--global", path.join(temporary, filename)], {
+      env,
+      timeoutMs: dependencies.installTimeoutMs
+    });
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
 }
 
 export async function maybeAutoUpdate(rawArgs, pkg, dependencies = {}) {
@@ -136,7 +153,7 @@ export async function maybeAutoUpdate(rawArgs, pkg, dependencies = {}) {
   const intervalHours = Number(config.settings?.update_check_hours ?? DEFAULT_INTERVAL_HOURS);
   const intervalMs = Math.max(0, intervalHours) * 60 * 60 * 1000;
   const state = readState(stateFile);
-  if (intervalMs > 0 && Number.isFinite(state.last_checked_at) && now - state.last_checked_at < intervalMs) {
+  if (intervalMs > 0 && state.registry && Number.isFinite(state.last_checked_at) && now - state.last_checked_at < intervalMs) {
     return { checked: false, reason: "fresh", latest: state.latest || null, registry: state.registry || null };
   }
 
